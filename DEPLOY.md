@@ -112,6 +112,54 @@ El job `deploy` usa el environment `production`; GitHub lo crea solo en la prime
 2. Cambia la variable `SITE_URL` en GitHub.
 3. Lanza el workflow (push o *Run workflow*). Traefik pide el certificado nuevo solo.
 
+## 6. API de "Prueba tu suerte" y panel /admin
+
+Contenedor `skyeggs-api` (Node + SQLite en el volumen `skyeggs-data`). Traefik le manda todo lo que empieza por `/api/`; lo demás sigue yendo a nginx. Hace el sorteo, guarda los premios, da los códigos y sirve los datos del panel `https://skyeggs.pro/admin/`.
+
+### Primera vez (en el servidor)
+
+```bash
+cd /opt/skyeggspage
+git pull
+# 1) clave compartida con el juego
+echo "GAME_KEY=$(openssl rand -hex 32)" >> .env
+# 2) hash de la contraseña del panel (te la pide; mínimo 12 caracteres)
+docker compose build skyeggs-api
+docker compose run --rm --no-deps skyeggs-api node --disable-warning=ExperimentalWarning src/hash-password.js
+#    copia la línea scrypt:... y ponla en .env como ADMIN_PASSWORD_HASH=scrypt:...
+nano .env            # revisa ADMIN_USER, ADMIN_PASSWORD_HASH, límites y MIN_LEVEL
+docker compose up -d skyeggs-api
+curl -s https://skyeggs.pro/api/health      # {"ok":true}
+```
+
+3) En Roblox: **Creator Dashboard → Huevos del cielo → Secrets → Create Secret**, nombre `SkyEggsWeb`, valor = el mismo `GAME_KEY`, dominio permitido `skyeggs.pro`. Y en Studio, **Game Settings → Security → Allow HTTP Requests** activado (y publicado).
+
+Mientras `.env` no tenga `GAME_KEY` y `ADMIN_PASSWORD_HASH`, el despliegue automático no levanta la API (la página sigue funcionando; el huevo muestra "No pudimos abrir el huevo").
+
+### Variables
+
+| Variable | Qué hace | Por defecto |
+|---|---|---|
+| `GAME_KEY` | Secreto que manda el juego en `X-Game-Key` | (obligatoria, ≥ 32 caracteres) |
+| `ADMIN_USER` / `ADMIN_PASSWORD_HASH` | Login del panel | `admin` / (obligatoria) |
+| `MAX_MYTHIC_PER_DAY` / `MAX_LEGENDARY_PER_DAY` | Premios que cada cuenta puede cobrar al día (hora de Colombia) | 5 / 5 |
+| `MIN_LEVEL` | Nivel mínimo en el juego para recibir premios (quedan guardados hasta llegar) | 10 |
+| `CODE_TTL_HOURS` | Horas que dura un código sin canjear | 72 |
+
+### Seguridad
+
+- El resultado lo decide el servidor (`crypto.randomInt`); la página solo anima. Cambiar el JS no da premios.
+- Los premios van siempre a la cuenta elegida, con tope diario por cuenta (también para los códigos, que se cuentan al canjear).
+- El juego solo recibe "userId + rareza"; el premio real (tirada de mascota de esa rareza) lo arma el juego y lo valida el MailService.
+- Endpoints del juego protegidos con `GAME_KEY` (comparación en tiempo constante). Panel con contraseña scrypt, cookie `HttpOnly; Secure; SameSite=Strict`, 5 intentos cada 15 min por IP.
+- Si un día se pone Cloudflare delante, cambia `IP_HEADER` a `cf-connecting-ip` para que el límite por IP siga funcionando.
+
+### Copia de seguridad
+
+```bash
+docker run --rm -v skyeggspage_skyeggs-data:/data -v "$PWD":/out alpine sh -c 'cp /data/skyeggs.db /out/skyeggs-$(date +%F).db'
+```
+
 ## Problemas comunes
 
 - **Certificado no se emite:** el DNS aún no apunta al servidor o el puerto 80 está cerrado (el reto HTTP de Let's Encrypt lo necesita).

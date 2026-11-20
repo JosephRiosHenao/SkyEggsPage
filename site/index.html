@@ -151,7 +151,40 @@
       <div class="wrap egg-zone__inner">
         <div class="egg-zone__copy">
           <h2 class="section-title section-title--light" id="egg-title">Prueba tu suerte</h2>
-          <p class="section-lead section-lead--light">Toca el huevo hasta que se rompa. ¿Te saldrá una mascota mítica? En el juego, solo una de cada 2.000 lo es.</p>
+          <p class="section-lead section-lead--light">Toca el huevo hasta que se rompa. Si te sale una mascota <b class="tag-legend">legendaria</b> o <b class="tag-mythic">mítica</b>, ¡te la llevas al juego!</p>
+
+          <div class="prize" id="prize">
+            <div class="prize__tabs" role="tablist" aria-label="Cómo recibir el premio">
+              <button class="prize__tab" type="button" role="tab" id="tab-mail" aria-controls="panel-mail" aria-selected="true">A mi buzón</button>
+              <button class="prize__tab" type="button" role="tab" id="tab-code" aria-controls="panel-code" aria-selected="false">Quiero un código</button>
+            </div>
+
+            <div class="prize__panel" role="tabpanel" id="panel-mail" aria-labelledby="tab-mail">
+              <form class="finder" id="finder" autocomplete="off" novalidate>
+                <label class="finder__label" for="finder-q">Tu usuario o tu nombre en Roblox</label>
+                <div class="finder__row">
+                  <input class="finder__input" id="finder-q" name="q" type="text" inputmode="text" maxlength="32" minlength="3" placeholder="Ej: PepitoGamer" spellcheck="false" autocapitalize="off" required>
+                  <button class="btn btn--yolk btn--sm" type="submit">Buscar</button>
+                </div>
+                <p class="finder__help" id="finder-help">Sirve el nombre con @ o el nombre que se ve arriba de tu personaje.</p>
+              </form>
+              <ul class="finder__list" id="finder-list" aria-label="Cuentas encontradas"></ul>
+              <div class="me" id="me" hidden>
+                <img class="me__pic" id="me-pic" width="52" height="52" alt="">
+                <div class="me__text">
+                  <p class="me__label">El premio llega a</p>
+                  <p class="me__name" id="me-name"></p>
+                  <p class="me__left" id="me-left"></p>
+                </div>
+                <button class="me__change" type="button" id="me-change">Cambiar</button>
+              </div>
+            </div>
+
+            <div class="prize__panel" role="tabpanel" id="panel-code" aria-labelledby="tab-code" hidden>
+              <p class="prize__info">Si sale una mascota legendaria o mítica, te damos un código. Canjéalo en el juego en <b>Tienda → Códigos</b> y llegará a tu buzón.</p>
+            </div>
+          </div>
+
           <div class="egg-result" id="egg-result" aria-live="polite">
             <p class="egg-result__hint" id="egg-hint">Faltan <b id="egg-taps">3</b> toques</p>
           </div>
@@ -159,7 +192,7 @@
             <button class="btn btn--ghost" type="button" id="egg-again" hidden>Abrir otro</button>
             <a class="btn btn--yolk" href="https://www.roblox.com/es/games/77372347150746/Huevos-del-cielo" target="_blank" rel="noopener" data-track="play-egg">Abrir huevos de verdad</a>
           </div>
-          <p class="egg-zone__note">Probabilidades base de las mascotas en Sky Eggs. Dentro del juego, la suerte y los huevos raros las mejoran.</p>
+          <p class="egg-zone__note">Probabilidades base de las mascotas en Sky Eggs. Puedes cobrar hasta 5 míticas y 5 legendarias al día por cuenta.</p>
         </div>
 
         <div class="egg-stage">
