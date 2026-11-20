@@ -32,6 +32,38 @@ services:
       - traefik.http.middlewares.skyeggs-to-main.redirectregex.replacement=https://${DOMAIN:-skyeggs.pro}$${1}
       - traefik.http.middlewares.skyeggs-to-main.redirectregex.permanent=true
 
+  # API de Prueba tu suerte (sorteo, premios al juego, códigos y panel /admin)
+  skyeggs-api:
+    image: ${API_IMAGE:-ghcr.io/josephrioshenao/skyeggspage-api:latest}
+    build:
+      context: ./api
+    container_name: skyeggs-api
+    restart: unless-stopped
+    environment:
+      GAME_KEY: ${GAME_KEY:-}
+      ADMIN_USER: ${ADMIN_USER:-admin}
+      ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH:-}
+      MAX_MYTHIC_PER_DAY: ${MAX_MYTHIC_PER_DAY:-5}
+      MAX_LEGENDARY_PER_DAY: ${MAX_LEGENDARY_PER_DAY:-5}
+      MIN_LEVEL: ${MIN_LEVEL:-10}
+      CODE_TTL_HOURS: ${CODE_TTL_HOURS:-72}
+    volumes:
+      - skyeggs-data:/data
+    networks:
+      - traefik
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=${TRAEFIK_NETWORK:-traefik}
+      - traefik.http.routers.skyeggs-api.rule=Host(`${DOMAIN:-skyeggs.pro}`) && PathPrefix(`/api/`)
+      - traefik.http.routers.skyeggs-api.priority=100
+      - traefik.http.routers.skyeggs-api.entrypoints=${TRAEFIK_ENTRYPOINT:-websecure}
+      - traefik.http.routers.skyeggs-api.tls=true
+      - traefik.http.routers.skyeggs-api.tls.certresolver=${TRAEFIK_CERTRESOLVER:-letsencrypt}
+      - traefik.http.services.skyeggs-api.loadbalancer.server.port=8080
+
+volumes:
+  skyeggs-data:
+
 networks:
   traefik:
     name: ${TRAEFIK_NETWORK:-traefik}

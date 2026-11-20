@@ -1,0 +1,12 @@
+{
+  "name": "skyeggs-api",
+  "private": true,
+  "type": "module",
+  "description": "API de Prueba tu suerte: sorteo en el servidor, premios al buzón del juego, códigos y panel de métricas",
+  "engines": { "node": ">=22.13" },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/server.js",
+    "test": "node --disable-warning=ExperimentalWarning --test test/*.test.js",
+    "hash-password": "node --disable-warning=ExperimentalWarning src/hash-password.js"
+  }
+}
