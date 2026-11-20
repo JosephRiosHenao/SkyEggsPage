@@ -11,6 +11,7 @@
     ["legendary", "Legendario", "#FFC21A", 0.2],
     ["mythic", "Mítico", "#FF6FAE", 0.05],
   ];
+  const PET_NAME = { common: "común", uncommon: "poco común", rare: "rara", epic: "épica", legendary: "legendaria", mythic: "mítica" };
   const TIER_NAME = Object.fromEntries(TIERS.map((t) => [t[0], t[1]]));
   const TIER_COLOR = Object.fromEntries(TIERS.map((t) => [t[0], t[2]]));
 
@@ -48,8 +49,7 @@
     try {
       await api("/api/admin/login", { user: $("login-user").value, password: $("login-pass").value });
       $("login-pass").value = "";
-      show("dash");
-      load();
+      start();
     } catch (err) {
       $("login-err").textContent = err.status === 429 ? "Demasiados intentos. Espera 15 minutos." : "Usuario o contraseña incorrectos.";
     }
@@ -169,7 +169,7 @@
       el("td", {}, when(r.createdAt)),
       el("td", {}, who(r)),
       tierCell(r.tier),
-      el("td", r.code ? { title: r.code } : {}, r.source === "code" ? "Código" : "Buzón"),
+      el("td", r.code ? { title: r.code } : {}, r.source === "admin" ? (r.code ? "Código del panel" : "Regalo del panel") : r.source === "code" ? "Código" : "Buzón"),
       el("td", {}, el("span", { class: `pill${r.status === "delivered" ? " pill--ok" : ""}` }, r.status === "delivered" ? `Entregado ${when(r.deliveredAt)}` : "Pendiente")),
     )) : [el("tr", {}, el("td", { colspan: "5" }, "Todavía no hay premios."))]));
 
@@ -178,8 +178,99 @@
     )) : [el("tr", {}, el("td", { colspan: "4" }, "Sin premios en los últimos 7 días."))]));
   }
 
+  // ---------- Generar códigos ----------
+  const pretty = (c) => `${c.slice(0, 3)}-${c.slice(3, 8)}-${c.slice(8)}`;
+  $("code-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const btn = e.submitter; if (btn) btn.disabled = true;
+    try {
+      const r = await api("/api/admin/codes", { tier: $("code-tier").value, count: Number($("code-count").value), days: Number($("code-days").value) });
+      if (!r.ok) throw new Error(r.error);
+      $("code-list").value = r.codes.map(pretty).join("\n");
+      $("code-list").rows = Math.min(10, Math.max(2, r.codes.length));
+      $("code-out").hidden = false;
+      loadCodes(); load();
+    } catch (err) {
+      if (err.status === 401) return show("login");
+      $("code-list").value = "No se pudieron generar los códigos.";
+      $("code-out").hidden = false;
+    } finally { if (btn) btn.disabled = false; }
+  });
+  $("code-copy").addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText($("code-list").value); $("code-copy").textContent = "¡Copiados!"; }
+    catch { $("code-list").select(); $("code-copy").textContent = "Cópialos con Ctrl+C"; }
+    setTimeout(() => { $("code-copy").textContent = "Copiar todos"; }, 2000);
+  });
+
+  async function loadCodes() {
+    try {
+      const { codes } = await api("/api/admin/codes");
+      const label = { active: "Activo", redeemed: "Canjeado", expired: "Vencido" };
+      $("admin-codes").tBodies[0].replaceChildren(...(codes.length ? codes.map((c) => el("tr", {},
+        el("td", {}, pretty(c.code)),
+        tierCell(c.tier),
+        el("td", {}, when(c.createdAt)),
+        el("td", {}, when(c.expiresAt)),
+        el("td", {}, el("span", { class: `pill${c.status === "redeemed" ? " pill--ok" : ""}` },
+          c.status === "redeemed" ? `Canjeado por ${who({ userId: c.redeemedBy, name: c.name, displayName: c.displayName })}` : label[c.status])),
+      )) : [el("tr", {}, el("td", { colspan: "5" }, "Todavía no has generado códigos."))]));
+    } catch { /* la tabla queda como estaba */ }
+  }
+
+  // ---------- Enviar regalo ----------
+  let giftTarget = null;
+  const alertMsg = (node, text, ok) => { node.textContent = text; node.className = `note ${ok ? "ok" : text ? "err" : ""}`; };
+  const giftDefault = $("gift-msg").textContent;
+  $("gift-search").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const q = $("gift-q").value.trim();
+    $("gift-picks").replaceChildren();
+    $("gift-form").hidden = true;
+    giftTarget = null;
+    alertMsg($("gift-msg"), "Buscando…", true);
+    try {
+      const r = await api(`/api/players/search?q=${encodeURIComponent(q)}`);
+      if (!r.players.length) return alertMsg($("gift-msg"), "No se encontró esa cuenta.", false);
+      alertMsg($("gift-msg"), "Elige la cuenta:", true);
+      for (const p of r.players) {
+        const b = el("button", { type: "button", class: "pickrow" },
+          el("img", { src: p.avatar || "/img/icon-192.png", alt: "" }),
+          el("span", {}, `${p.displayName} `, el("small", {}, `@${p.name}${p.played ? " · juega Sky Eggs" : " · nunca entró al juego"}`)));
+        b.addEventListener("click", () => {
+          giftTarget = p;
+          $("gift-picks").replaceChildren();
+          $("gift-to").textContent = `Para: ${p.displayName} (@${p.name}) · id ${p.userId}`;
+          $("gift-form").hidden = false;
+          alertMsg($("gift-msg"), giftDefault, true);
+        });
+        $("gift-picks").append(el("li", {}, b));
+      }
+    } catch (err) {
+      alertMsg($("gift-msg"), err.status === 429 ? "Demasiadas búsquedas, espera un momento." : "No se pudo buscar.", false);
+    }
+  });
+  $("gift-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (!giftTarget) return;
+    const tier = $("gift-tier").value;
+    const count = Number($("gift-count").value);
+    const what = `${count} mascota${count > 1 ? "s" : ""} ${PET_NAME[tier]}${count > 1 ? "s" : ""}`;
+    if (!window.confirm(`¿Enviar ${what} a @${giftTarget.name}?`)) return;
+    const btn = e.submitter; if (btn) btn.disabled = true;
+    try {
+      const r = await api("/api/admin/gift", { userId: giftTarget.userId, tier, count });
+      if (!r.ok) throw Object.assign(new Error(r.error), {});
+      alertMsg($("gift-msg"), `Enviado: ${what} para @${r.player.name}. ${r.player.played ? "Le llega en menos de un minuto si está conectado." : "Le llegará cuando entre al juego."}`, true);
+      load();
+    } catch (err) {
+      if (err.status === 401) return show("login");
+      alertMsg($("gift-msg"), "No se pudo enviar el regalo.", false);
+    } finally { if (btn) btn.disabled = false; }
+  });
+
   $("days").addEventListener("change", load);
   $("refresh").addEventListener("click", load);
 
-  api("/api/admin/me").then(() => { show("dash"); load(); }).catch(() => show("login"));
+  const start = () => { show("dash"); load(); loadCodes(); };
+  api("/api/admin/me").then(start).catch(() => show("login"));
 })();

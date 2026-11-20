@@ -1,6 +1,6 @@
 // Rutas HTTP de la API (sin dependencias externas).
 import { createHash } from "node:crypto";
-import { doRoll, gamePull, gameAck, gameRedeem, recordVisit, metrics, remainingToday } from "./logic.js";
+import { doRoll, gamePull, gameAck, gameRedeem, recordVisit, metrics, remainingToday, adminCreateCodes, adminListCodes, adminGift } from "./logic.js";
 import { searchPlayers } from "./roblox.js";
 import { safeEqual, verifyPassword, createSession, checkSession, deleteSession, readCookie, COOKIE, SESSION_MS } from "./auth.js";
 
@@ -146,6 +146,19 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console }) {
     "GET /api/admin/metrics": async (req, url) => {
       requireAdmin(req);
       return metrics(db, cfg, Number(url.searchParams.get("days")) || 30);
+    },
+    "GET /api/admin/codes": async (req) => { requireAdmin(req); return { codes: adminListCodes(db) }; },
+    "POST /api/admin/codes": async (req) => {
+      checkOrigin(req); requireAdmin(req);
+      const out = adminCreateCodes(db, await readJson(req, 512));
+      if (out.ok) log.info(`[admin] ${out.codes.length} código(s) ${out.tier} generados desde ${ipOf(req)}`);
+      return out;
+    },
+    "POST /api/admin/gift": async (req) => {
+      checkOrigin(req); requireAdmin(req);
+      const out = adminGift(db, cfg, await readJson(req, 512));
+      if (out.ok) log.info(`[admin] regalo ${out.sent}x ${out.tier} a ${out.player.name} (${out.player.userId}) desde ${ipOf(req)}`);
+      return out;
     },
   };
 

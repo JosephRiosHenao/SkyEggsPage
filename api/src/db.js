@@ -78,6 +78,9 @@ export function openDb(path) {
       token_hash TEXT PRIMARY KEY, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL
     );
   `);
+  // Migraciones simples (columnas nuevas en bases ya creadas).
+  const cols = (t) => db.prepare(`PRAGMA table_info(${t})`).all().map((c) => c.name);
+  if (!cols("codes").includes("origin")) db.exec("ALTER TABLE codes ADD COLUMN origin TEXT NOT NULL DEFAULT 'web'");
   return db;
 }
 

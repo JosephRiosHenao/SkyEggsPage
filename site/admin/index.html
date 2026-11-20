@@ -40,6 +40,51 @@
       </header>
       <p class="dash__meta" id="meta"></p>
 
+      <div class="grid">
+        <article class="card">
+          <h2>Generar códigos</h2>
+          <form class="form" id="code-form">
+            <div class="form__row">
+              <label>Rareza
+                <select id="code-tier"><option value="mythic">Mítico</option><option value="legendary">Legendario</option></select>
+              </label>
+              <label>Cantidad <input id="code-count" type="number" min="1" max="50" value="1" required></label>
+              <label>Vence en (días) <input id="code-days" type="number" min="1" max="30" value="7" required></label>
+            </div>
+            <button type="submit">Generar</button>
+          </form>
+          <p class="note">Para sorteos o Discord. Cada código sirve una vez, no pide nivel y no cuenta para el tope diario. Se canjea en Tienda → Códigos.</p>
+          <div class="out" id="code-out" hidden>
+            <textarea id="code-list" rows="4" readonly aria-label="Códigos generados"></textarea>
+            <button type="button" class="ghost" id="code-copy">Copiar todos</button>
+          </div>
+        </article>
+
+        <article class="card">
+          <h2>Enviar regalo a un jugador</h2>
+          <form class="form" id="gift-search">
+            <label>Usuario o nombre visible
+              <div class="form__inline"><input id="gift-q" maxlength="32" minlength="3" required placeholder="Ej: PepitoGamer"><button type="submit" class="ghost">Buscar</button></div>
+            </label>
+          </form>
+          <ul class="picks" id="gift-picks"></ul>
+          <form class="form" id="gift-form" hidden>
+            <p class="gift-to" id="gift-to"></p>
+            <div class="form__row">
+              <label>Mascota
+                <select id="gift-tier">
+                  <option value="mythic">Mítica</option><option value="legendary">Legendaria</option><option value="epic">Épica</option>
+                  <option value="rare">Rara</option><option value="uncommon">Poco común</option><option value="common">Común</option>
+                </select>
+              </label>
+              <label>Cantidad <input id="gift-count" type="number" min="1" max="10" value="1" required></label>
+            </div>
+            <button type="submit">Enviar al buzón</button>
+          </form>
+          <p class="note" id="gift-msg">Llega a su buzón en menos de un minuto si está conectado, o cuando entre al juego. Es una tirada de mascota de esa rareza.</p>
+        </article>
+      </div>
+
       <div class="tiles" id="tiles"></div>
 
       <div class="grid">
@@ -68,6 +113,15 @@
       </div>
 
       <div class="grid">
+        <article class="card card--wide">
+          <h2>Códigos generados en el panel</h2>
+          <div class="scroll">
+            <table class="tbl" id="admin-codes">
+              <thead><tr><th>Código</th><th>Rareza</th><th>Creado</th><th>Vence</th><th>Estado</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </article>
         <article class="card card--wide">
           <h2>Últimos premios</h2>
           <div class="scroll">
