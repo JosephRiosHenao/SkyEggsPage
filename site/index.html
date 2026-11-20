@@ -32,7 +32,8 @@
   <link rel="preload" href="/fonts/baloo-2-500.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/img/portada.webp" as="image" type="image/webp" fetchpriority="high"
         imagesrcset="/img/portada-sm.webp 560w, /img/portada.webp 960w" imagesizes="(min-width: 960px) 46vw, 90vw">
-  <link rel="stylesheet" href="/css/styles.css">
+  <!-- ?v=__ASSET_V__ cambia en cada versión (Dockerfile): el navegador nunca usa un CSS/JS viejo con este HTML -->
+  <link rel="stylesheet" href="/css/styles.css?v=__ASSET_V__">
 
   <script type="application/ld+json">
   {
@@ -160,13 +161,14 @@
             </div>
 
             <div class="prize__panel" role="tabpanel" id="panel-mail" aria-labelledby="tab-mail">
-              <form class="finder" id="finder" autocomplete="off" novalidate>
+              <!-- action/method: respaldo si el JS no cargó; main.js lo maneja sin recargar la página -->
+              <form class="finder" id="finder" action="/#huevo" method="get" role="search" autocomplete="off" novalidate>
                 <label class="finder__label" for="finder-q">Tu usuario o tu nombre en Roblox</label>
                 <div class="finder__row">
-                  <input class="finder__input" id="finder-q" name="q" type="text" inputmode="text" maxlength="32" minlength="3" placeholder="Ej: PepitoGamer" spellcheck="false" autocapitalize="off" required>
+                  <input class="finder__input" id="finder-q" name="q" type="text" inputmode="text" enterkeyhint="search" maxlength="32" minlength="3" placeholder="Ej: PepitoGamer" spellcheck="false" autocapitalize="off" autocorrect="off" aria-controls="finder-list" aria-describedby="finder-help" required>
                   <button class="btn btn--yolk btn--sm" type="submit">Buscar</button>
                 </div>
-                <p class="finder__help" id="finder-help">Sirve el nombre con @ o el nombre que se ve arriba de tu personaje.</p>
+                <p class="finder__help" id="finder-help" aria-live="polite">Escribe tu @usuario o el nombre que se ve arriba de tu personaje. Las cuentas aparecen mientras escribes.</p>
               </form>
               <ul class="finder__list" id="finder-list" aria-label="Cuentas encontradas"></ul>
               <div class="me" id="me" hidden>
@@ -249,6 +251,6 @@
     </div>
   </footer>
 
-  <script src="/js/main.js" defer></script>
+  <script src="/js/main.js?v=__ASSET_V__" defer></script>
 </body>
 </html>

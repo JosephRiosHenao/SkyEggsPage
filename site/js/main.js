@@ -33,10 +33,10 @@
   let mode = store.get("se_mode") === "code" ? "code" : "mail";
   let me = store.get("se_player"); // { userId, name, displayName, avatar }
 
-  const api = async (path, body) => {
+  const api = async (path, body, signal) => {
     const res = await fetch(path, body === undefined
-      ? { headers: { accept: "application/json" } }
-      : { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      ? { headers: { accept: "application/json" }, signal }
+      : { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw Object.assign(new Error(data.error || "error"), { status: res.status });
     return data;
@@ -74,6 +74,8 @@
   }
 
   // ---------- Buscar la cuenta (usuario o nombre visible) ----------
+  // Las cuentas aparecen MIENTRAS escribes (tras una pausa corta) y también con
+  // Enter o "Buscar". El formulario se maneja aquí: la página nunca se recarga.
   const finder = $("finder");
   const input = $("finder-q");
   const help = $("finder-help");
@@ -82,11 +84,102 @@
   const helpText = help.textContent;
   const say = (text, isError) => { help.textContent = text; help.classList.toggle("is-error", Boolean(isError)); };
 
+  const MIN_Q = 3; // la API pide al menos 3 letras
+  const TYPE_DELAY = 450; // ms de pausa al escribir antes de buscar
+  const CACHE_MS = 5 * 60 * 1000;
+  const clean = (raw) => String(raw || "").normalize("NFKC").replace(/^\s*@/, "").replace(/\s+/g, " ").trim().slice(0, 32);
+  const found = new Map(); // búsqueda (minúsculas) → { at, players }
+  let typeTimer = 0;
+  let searchCtrl = null;
+  let searchSeq = 0; // descarta respuestas que llegan tarde
+  let shownQ = ""; // búsqueda cuyas cuentas están en la lista
+  let slowUntil = 0; // tras un "vas muy rápido" no se busca al escribir
+
+  const clearPicks = () => { list.replaceChildren(); shownQ = ""; };
+
+  const renderPicks = (players) => {
+    list.replaceChildren();
+    for (const p of players) {
+      const li = el("li");
+      const b = el("button", "pick");
+      b.type = "button";
+      const img = el("img", "pick__pic");
+      img.src = p.avatar || "/img/icon-192.png";
+      img.alt = "";
+      img.width = 52; img.height = 52;
+      const text = el("span", "pick__text");
+      text.append(el("span", "pick__dn", p.displayName), el("br"), el("span", "pick__un", `@${p.name}`));
+      if (p.played) { text.append(el("br"), el("span", "pick__badge", "Juega Sky Eggs")); }
+      b.append(img, text, el("span", "pick__go", "¡Soy yo!"));
+      b.setAttribute("aria-label", `${p.displayName}, @${p.name}${p.played ? ", juega Sky Eggs" : ""}. Elegir esta cuenta`);
+      b.addEventListener("click", () => choose(p));
+      li.append(b);
+      list.append(li);
+    }
+  };
+
+  // typed = true: búsqueda mientras escribe (no mueve el foco ni marca errores fuertes).
+  const search = async (raw, typed = false) => {
+    clearTimeout(typeTimer);
+    const q = clean(raw);
+    if (q.length < MIN_Q) {
+      searchSeq += 1;
+      if (searchCtrl) searchCtrl.abort();
+      clearPicks();
+      if (typed) say(q.length ? `Escribe ${MIN_Q - q.length} ${MIN_Q - q.length === 1 ? "letra" : "letras"} más…` : helpText);
+      else say("Escribe al menos 3 letras.", true);
+      return;
+    }
+    const key = q.toLowerCase();
+    if (key === shownQ && list.childElementCount) {
+      if (!typed) list.querySelector("button")?.focus();
+      return;
+    }
+    if (typed && Date.now() < slowUntil) return;
+    const seq = ++searchSeq;
+    if (searchCtrl) searchCtrl.abort();
+    searchCtrl = null;
+
+    let players;
+    const hit = found.get(key);
+    if (hit && Date.now() - hit.at < CACHE_MS) {
+      players = hit.players;
+    } else {
+      const ctrl = new AbortController();
+      searchCtrl = ctrl;
+      say("Buscando…");
+      try {
+        const r = await api(`/api/players/search?q=${encodeURIComponent(q)}`, undefined, ctrl.signal);
+        players = Array.isArray(r.players) ? r.players : [];
+        found.set(key, { at: Date.now(), players });
+        if (found.size > 100) found.delete(found.keys().next().value);
+      } catch (err) {
+        if (ctrl.signal.aborted || seq !== searchSeq) return; // ya escribiste otra cosa
+        if (err.status === 429) {
+          slowUntil = Date.now() + 8000;
+          say(typed ? "Termina de escribir y pulsa Buscar." : "Vas muy rápido. Espera unos segundos y vuelve a buscar.", true);
+        } else {
+          say("No pudimos buscar ahora. Intenta otra vez.", true);
+        }
+        return;
+      }
+    }
+    if (seq !== searchSeq) return;
+    shownQ = key;
+    renderPicks(players);
+    if (!players.length) {
+      say(typed ? "Aún no aparece. Sigue escribiendo o revisa cómo se escribe." : "No encontramos esa cuenta. Revisa cómo se escribe.", !typed);
+      return;
+    }
+    say(players.length === 1 ? "¿Eres tú? Toca tu cuenta." : "¿Cuál eres tú? Toca tu cuenta.");
+    if (!typed) list.querySelector("button")?.focus();
+  };
+
   const renderMe = async () => {
     const has = Boolean(me && me.userId);
     finder.hidden = has;
     meBox.hidden = !has;
-    list.replaceChildren();
+    clearPicks();
     if (!has) return;
     $("me-pic").src = /^https:\/\/[a-z0-9.-]+\.rbxcdn\.com\//.test(me.avatar || "") ? me.avatar : "/img/icon-192.png";
     $("me-name").textContent = me.displayName && me.displayName !== me.name ? `${me.displayName} (@${me.name})` : `@${me.name}`;
@@ -102,46 +195,52 @@
     store.set("se_player", me);
     renderMe();
     say(helpText);
+    // Siguiente paso: el huevo (la cuenta ya quedó elegida).
+    hint("¡Listo! Ahora toca el huevo.");
   };
 
-  finder.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const q = input.value.trim().replace(/^@/, "");
-    if (q.length < 3) return say("Escribe al menos 3 letras.", true);
-    say("Buscando…");
-    list.replaceChildren();
-    try {
-      const r = await api(`/api/players/search?q=${encodeURIComponent(q)}`);
-      if (!r.players.length) return say("No encontramos esa cuenta. Revisa cómo se escribe.", true);
-      say(r.players.length === 1 ? "¿Eres tú?" : "¿Cuál eres tú?");
-      for (const p of r.players) {
-        const li = el("li");
-        const b = el("button", "pick");
-        b.type = "button";
-        const img = el("img", "pick__pic");
-        img.src = p.avatar || "/img/icon-192.png";
-        img.alt = "";
-        img.width = 52; img.height = 52;
-        const text = el("span", "pick__text");
-        text.append(el("span", "pick__dn", p.displayName), el("br"), el("span", "pick__un", `@${p.name}`));
-        if (p.played) { text.append(el("br"), el("span", "pick__badge", "Juega Sky Eggs")); }
-        b.append(img, text, el("span", "pick__go", "¡Soy yo!"));
-        b.setAttribute("aria-label", `${p.displayName}, @${p.name}${p.played ? ", juega Sky Eggs" : ""}. Elegir esta cuenta`);
-        b.addEventListener("click", () => choose(p));
-        li.append(b);
-        list.append(li);
-      }
-      list.querySelector("button")?.focus();
-    } catch (err) {
-      say(err.status === 429 ? "Vas muy rápido. Espera un momento." : "No pudimos buscar ahora. Intenta otra vez.", true);
+  input.addEventListener("input", () => {
+    clearTimeout(typeTimer);
+    if (clean(input.value).length < MIN_Q) { search(input.value, true); return; }
+    typeTimer = setTimeout(() => search(input.value, true), TYPE_DELAY);
+  });
+
+  // Teclado: flecha abajo entra en la lista; Escape la cierra.
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown") {
+      const first = list.querySelector("button");
+      if (first) { e.preventDefault(); first.focus(); }
+    } else if (e.key === "Escape" && list.childElementCount) {
+      clearPicks();
+      say(helpText);
     }
+  });
+  list.addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Escape") return;
+    const buttons = [...list.querySelectorAll("button")];
+    const i = buttons.indexOf(document.activeElement);
+    if (i < 0) return;
+    e.preventDefault();
+    if (e.key === "Escape") { input.focus(); return; }
+    const next = e.key === "ArrowDown" ? i + 1 : i - 1;
+    if (next < 0) input.focus();
+    else buttons[Math.min(next, buttons.length - 1)].focus();
+  });
+
+  finder.addEventListener("submit", (e) => {
+    e.preventDefault();
+    search(input.value);
   });
 
   $("me-change").addEventListener("click", () => {
+    const prev = me && me.name;
     me = null;
     store.del("se_player");
     renderMe();
+    // Deja el nombre anterior escrito para corregirlo sin teclear todo otra vez.
+    if (prev) input.value = prev;
     input.focus();
+    input.select();
   });
 
   // ---------- Huevo ----------
@@ -235,8 +334,8 @@
   egg.addEventListener("click", () => {
     if (busy || egg.classList.contains("is-open")) return;
     if (mode === "mail" && !(me && me.userId)) {
-      hint("Primero escribe tu usuario de Roblox arriba, o elige “Quiero un código”.");
-      input.focus();
+      hint("Primero escribe tu usuario de Roblox arriba y toca tu cuenta, o elige “Quiero un código”.");
+      input.focus({ preventScroll: true });
       return;
     }
     taps += 1;
@@ -261,4 +360,23 @@
 
   setMode(mode);
   renderMe();
+
+  // Respaldo: si el formulario se envió sin este script (p. ej. un main.js viejo
+  // en la caché del navegador), la búsqueda llega en la URL (?q=…#huevo).
+  // Se recupera, se quita de la URL y se busca, sin perder lo que se escribió.
+  try {
+    const params = new URLSearchParams(location.search);
+    const urlQ = params.get("q");
+    if (urlQ !== null) {
+      params.delete("q");
+      const rest = params.toString();
+      history.replaceState(null, "", `${location.pathname}${rest ? `?${rest}` : ""}#huevo`);
+      if (!(me && me.userId) && clean(urlQ)) {
+        setMode("mail");
+        input.value = clean(urlQ);
+        $("huevo").scrollIntoView({ block: "start" });
+        search(urlQ);
+      }
+    }
+  } catch { /* URL rara: se ignora */ }
 })();

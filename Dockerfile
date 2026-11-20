@@ -11,8 +11,14 @@ COPY docker/nginx.conf /etc/nginx/conf.d/site.conf
 COPY docker/security-headers.conf /etc/nginx/snippets/security-headers.conf
 COPY site/ /usr/share/nginx/html/
 
-RUN find /usr/share/nginx/html -type f \( -name '*.html' -o -name '*.xml' -o -name '*.txt' \) \
-      -exec sed -i "s|__SITE_URL__|${SITE_URL%/}|g" {} + \
+# __ASSET_V__ = huella del CSS/JS. Va en las URL (?v=…) para que, tras cada
+# despliegue, el navegador descargue el CSS/JS nuevo aunque tenga el viejo en
+# caché (CSS/JS se cachean 7 días; el HTML siempre se revalida).
+RUN cd /usr/share/nginx/html \
+ && ASSET_V=$(find . -type f \( -name '*.css' -o -name '*.js' \) | sort | xargs cat | md5sum | cut -c1-10) \
+ && find . -type f \( -name '*.html' -o -name '*.xml' -o -name '*.txt' \) \
+      -exec sed -i -e "s|__SITE_URL__|${SITE_URL%/}|g" -e "s|__ASSET_V__|${ASSET_V}|g" {} + \
+ && ! grep -rl '__ASSET_V__\|__SITE_URL__' --include='*.html' . \
  && nginx -t
 
 EXPOSE 80
