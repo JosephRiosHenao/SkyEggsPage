@@ -7,6 +7,16 @@ push a main ──> GitHub Actions ──> imagen en ghcr.io/josephrioshenao/sky
                                     └─ SSH al servidor ─> git pull + docker compose pull + up -d
 ```
 
+## Dominios
+
+| Dominio | Qué hace |
+|---|---|
+| `skyeggs.pro` | Dominio principal (canonical, sitemap, Open Graph) |
+| `www.skyeggs.pro` | Redirige 301 a `https://skyeggs.pro` |
+| `huevosdelcielo.pro` y `www.huevosdelcielo.pro` | Redirigen 301 a `https://skyeggs.pro` |
+
+Los cuatro apuntan a `173.249.60.5`. Traefik pide certificados para todos.
+
 ## 1. Requisitos del servidor
 
 - Linux con Docker Engine y el plugin `docker compose` (v2).
@@ -20,7 +30,7 @@ sudo mkdir -p /opt/skyeggspage && sudo chown "$USER" /opt/skyeggspage
 git clone https://github.com/JosephRiosHenao/SkyEggsPage.git /opt/skyeggspage
 cd /opt/skyeggspage
 cp .env.example .env
-nano .env            # pon DOMAIN=tu-dominio.com y revisa el resto
+nano .env            # ya trae DOMAIN=skyeggs.pro y ALT_DOMAIN=huevosdelcielo.pro; revisa lo de Traefik
 ```
 
 ### ¿Ya hay un Traefik corriendo?
@@ -60,7 +70,8 @@ Comprueba:
 
 ```bash
 docker compose ps
-curl -I https://TU-DOMINIO
+curl -I https://skyeggs.pro
+curl -I https://huevosdelcielo.pro   # debe responder 301 hacia skyeggs.pro
 ```
 
 ## 4. Configurar GitHub Actions (despliegue automático)
@@ -71,7 +82,7 @@ En GitHub: **Settings → Secrets and variables → Actions**.
 
 | Nombre | Valor |
 |---|---|
-| `SITE_URL` | `https://tu-dominio.com` (sin barra final; debe coincidir con `DOMAIN`) |
+| `SITE_URL` | `https://skyeggs.pro` (opcional: ya es el valor por defecto) |
 | `DEPLOY_ENABLED` | `true` (actívalo cuando el servidor ya esté listo) |
 | `DEPLOY_PATH` | `/opt/skyeggspage` (opcional, ese es el valor por defecto) |
 
@@ -106,4 +117,4 @@ El job `deploy` usa el environment `production`; GitHub lo crea solo en la prime
 - **Certificado no se emite:** el DNS aún no apunta al servidor o el puerto 80 está cerrado (el reto HTTP de Let's Encrypt lo necesita).
 - **404 de Traefik:** el contenedor no está en la red de Traefik (`TRAEFIK_NETWORK`) o el entrypoint/certresolver no coinciden con los de tu Traefik.
 - **`denied` al hacer pull:** el paquete de GHCR es privado; el workflow ya inicia sesión al desplegar, pero para un pull manual usa `docker login ghcr.io`.
-- **Canonical u Open Graph con `skyeggs.example.com`:** falta la variable `SITE_URL` en GitHub (o el `DOMAIN` en `.env` si construyes en el servidor).
+- **Canonical u Open Graph con otro dominio:** revisa la variable `SITE_URL` en GitHub (o `DOMAIN` en `.env` si construyes en el servidor).

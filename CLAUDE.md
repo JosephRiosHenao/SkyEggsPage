@@ -13,6 +13,10 @@ Landing estática del juego de Roblox **Sky Eggs (Huevos del cielo)**. Público:
 - `docker-compose.traefik.yml`: Traefik con Let's Encrypt, solo si el servidor no tiene uno.
 - `.github/workflows/deploy.yml`: construye, publica en GHCR y despliega por SSH.
 
+## Dominios
+
+- Principal: `skyeggs.pro`. `www.skyeggs.pro`, `huevosdelcielo.pro` y `www.huevosdelcielo.pro` redirigen 301 al principal (labels de Traefik en `docker-compose.yml`). Todos apuntan a `173.249.60.5`.
+
 ## Enlaces clave (no cambiar sin pedirlo)
 
 - Juego: https://www.roblox.com/es/games/77372347150746/Huevos-del-cielo
@@ -22,10 +26,10 @@ Landing estática del juego de Roblox **Sky Eggs (Huevos del cielo)**. Público:
 
 Seguir `DEPLOY.md` paso a paso. Resumen:
 
-1. Clonar en `/opt/skyeggspage`, `cp .env.example .env` y poner `DOMAIN`.
+1. Clonar en `/opt/skyeggspage`, `cp .env.example .env` (ya trae `DOMAIN=skyeggs.pro` y `ALT_DOMAIN=huevosdelcielo.pro`).
 2. Detectar si ya existe Traefik (`docker ps`, `docker network ls`) y ajustar `TRAEFIK_NETWORK`, `TRAEFIK_ENTRYPOINT`, `TRAEFIK_CERTRESOLVER`. Si no existe, crear la red `traefik` y levantar `docker-compose.traefik.yml`.
 3. `docker compose up -d --build` y comprobar `curl -I https://$DOMAIN`.
-4. Para el despliegue automático: clave SSH de despliegue, secrets `SSH_HOST`/`SSH_USER`/`SSH_KEY` y variables `SITE_URL`/`DEPLOY_ENABLED=true` en GitHub.
+4. Para el despliegue automático: clave SSH de despliegue, secrets `SSH_HOST`/`SSH_USER`/`SSH_KEY` y variable `DEPLOY_ENABLED=true` (y `SITE_URL=https://skyeggs.pro`, opcional) en GitHub.
 
 No tocar otros contenedores ni la configuración de un Traefik existente sin confirmarlo con el dueño.
 

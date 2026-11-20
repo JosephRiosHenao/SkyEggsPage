@@ -55,7 +55,7 @@ jobs:
           context: .
           push: ${{ github.event_name != 'pull_request' }}
           build-args: |
-            SITE_URL=${{ vars.SITE_URL || 'https://skyeggs.example.com' }}
+            SITE_URL=${{ vars.SITE_URL || 'https://skyeggs.pro' }}
           tags: |
             ${{ steps.meta.outputs.image }}:latest
             ${{ steps.meta.outputs.image }}:${{ github.sha }}

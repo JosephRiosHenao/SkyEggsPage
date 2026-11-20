@@ -2,7 +2,7 @@
 FROM nginx:1.27-alpine
 
 # URL pública del sitio, sin barra final (canonical, Open Graph, sitemap).
-ARG SITE_URL=https://skyeggs.example.com
+ARG SITE_URL=https://skyeggs.pro
 
 RUN rm -rf /usr/share/nginx/html/* /etc/nginx/conf.d/default.conf \
  && mkdir -p /etc/nginx/snippets

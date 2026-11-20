@@ -6,7 +6,7 @@ services:
     build:
       context: .
       args:
-        SITE_URL: https://${DOMAIN:?Define DOMAIN en .env}
+        SITE_URL: https://${DOMAIN:-skyeggs.pro}
     container_name: skyeggs-web
     restart: unless-stopped
     networks:
@@ -15,22 +15,22 @@ services:
       - traefik.enable=true
       - traefik.docker.network=${TRAEFIK_NETWORK:-traefik}
       # Dominio principal
-      - traefik.http.routers.skyeggs.rule=Host(`${DOMAIN}`)
+      - traefik.http.routers.skyeggs.rule=Host(`${DOMAIN:-skyeggs.pro}`)
       - traefik.http.routers.skyeggs.entrypoints=${TRAEFIK_ENTRYPOINT:-websecure}
       - traefik.http.routers.skyeggs.tls=true
       - traefik.http.routers.skyeggs.tls.certresolver=${TRAEFIK_CERTRESOLVER:-letsencrypt}
       - traefik.http.routers.skyeggs.middlewares=skyeggs-compress
       - traefik.http.services.skyeggs.loadbalancer.server.port=80
       - traefik.http.middlewares.skyeggs-compress.compress=true
-      # www -> dominio principal (301)
-      - traefik.http.routers.skyeggs-www.rule=Host(`www.${DOMAIN}`)
-      - traefik.http.routers.skyeggs-www.entrypoints=${TRAEFIK_ENTRYPOINT:-websecure}
-      - traefik.http.routers.skyeggs-www.tls=true
-      - traefik.http.routers.skyeggs-www.tls.certresolver=${TRAEFIK_CERTRESOLVER:-letsencrypt}
-      - traefik.http.routers.skyeggs-www.middlewares=skyeggs-www-redirect
-      - traefik.http.middlewares.skyeggs-www-redirect.redirectregex.regex=^https?://www\.(.*)
-      - traefik.http.middlewares.skyeggs-www-redirect.redirectregex.replacement=https://$${1}
-      - traefik.http.middlewares.skyeggs-www-redirect.redirectregex.permanent=true
+      # www y dominio alterno -> dominio principal (301)
+      - traefik.http.routers.skyeggs-redirect.rule=Host(`www.${DOMAIN:-skyeggs.pro}`) || Host(`${ALT_DOMAIN:-huevosdelcielo.pro}`) || Host(`www.${ALT_DOMAIN:-huevosdelcielo.pro}`)
+      - traefik.http.routers.skyeggs-redirect.entrypoints=${TRAEFIK_ENTRYPOINT:-websecure}
+      - traefik.http.routers.skyeggs-redirect.tls=true
+      - traefik.http.routers.skyeggs-redirect.tls.certresolver=${TRAEFIK_CERTRESOLVER:-letsencrypt}
+      - traefik.http.routers.skyeggs-redirect.middlewares=skyeggs-to-main
+      - traefik.http.middlewares.skyeggs-to-main.redirectregex.regex=^https?://[^/]+(.*)
+      - traefik.http.middlewares.skyeggs-to-main.redirectregex.replacement=https://${DOMAIN:-skyeggs.pro}$${1}
+      - traefik.http.middlewares.skyeggs-to-main.redirectregex.permanent=true
 
 networks:
   traefik:
