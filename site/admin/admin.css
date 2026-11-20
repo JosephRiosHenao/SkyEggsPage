@@ -94,3 +94,23 @@ select, input { min-height: 38px; padding: 0 .6rem; border-radius: 9px; border: 
   position: fixed; z-index: 10; pointer-events: none; padding: .4rem .6rem; border-radius: 8px;
   background: var(--text-primary); color: var(--surface-1); font-size: .82rem; white-space: nowrap;
 }
+
+/* Acciones */
+.form { display: grid; gap: .7rem; }
+.form label { display: grid; gap: .25rem; color: var(--text-secondary); font-weight: 600; font-size: .88rem; }
+.form__row { display: flex; flex-wrap: wrap; gap: .6rem; }
+.form__row label { flex: 1 1 120px; }
+.form__inline { display: flex; gap: .5rem; }
+.form__inline input { flex: 1; min-width: 0; }
+.form button[type="submit"] { justify-self: start; }
+.out { display: grid; gap: .5rem; margin-top: .7rem; }
+.out textarea { width: 100%; font: 600 .95rem ui-monospace, SFMono-Regular, Menlo, monospace; padding: .5rem .6rem; border-radius: 9px; border: 1px solid var(--border); background: var(--surface-0); color: var(--text-primary); resize: vertical; }
+.out button { justify-self: start; }
+.picks { list-style: none; margin: .6rem 0 0; padding: 0; display: grid; gap: .4rem; }
+.pickrow { display: flex; align-items: center; gap: .6rem; width: 100%; text-align: left; min-height: 52px; padding: .35rem .5rem; border-radius: 10px; border: 1px solid var(--border); background: var(--surface-0); color: var(--text-primary); font-weight: 500; cursor: pointer; }
+.pickrow:hover, .pickrow:focus-visible { border-color: var(--accent); }
+.pickrow img { width: 40px; height: 40px; border-radius: 8px; background: var(--grid); flex: none; }
+.pickrow small { color: var(--text-muted); }
+.gift-to { margin: .6rem 0 0; font-weight: 600; }
+.ok { color: var(--text-primary); font-weight: 600; }
+.err { color: var(--danger); font-weight: 600; }

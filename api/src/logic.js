@@ -32,7 +32,8 @@ export const CODE_RE = /^SKY[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{10}$/;
 export const newId = () => randomBytes(12).toString("hex");
 
 function countToday(db, userId, tier, day) {
-  return db.prepare("SELECT COUNT(*) AS n FROM rewards WHERE user_id = ? AND tier = ? AND day = ?").get(userId, tier, day).n;
+  // Los regalos del staff (source 'admin') no cuentan para el tope diario.
+  return db.prepare("SELECT COUNT(*) AS n FROM rewards WHERE user_id = ? AND tier = ? AND day = ? AND source != 'admin'").get(userId, tier, day).n;
 }
 
 export function remainingToday(db, cfg, userId, now = Date.now()) {
@@ -120,12 +121,13 @@ export function gamePull(db, cfg, body, now = Date.now()) {
   return tx(db, () => {
     db.prepare("INSERT INTO server_days (day, job_id) VALUES (?, ?) ON CONFLICT(day, job_id) DO UPDATE SET pulls = pulls + 1")
       .run(day, jobId);
-    const pending = db.prepare("SELECT id, user_id AS userId, tier FROM rewards WHERE user_id = ? AND status = 'pending' ORDER BY created_at LIMIT 20");
+    const pending = db.prepare("SELECT id, user_id AS userId, tier, source FROM rewards WHERE user_id = ? AND status = 'pending' ORDER BY created_at LIMIT 20");
     const rewards = [];
     for (const p of players) {
       upsertGamePlayer(db, p, day, now);
-      if (cfg.minLevel > 0 && !(p.level >= cfg.minLevel)) continue;
-      rewards.push(...pending.all(p.userId));
+      const lowLevel = cfg.minLevel > 0 && !(p.level >= cfg.minLevel);
+      // Por debajo del nivel mínimo solo llegan los regalos del staff.
+      for (const r of pending.all(p.userId)) if (!lowLevel || r.source === "admin") rewards.push(r);
     }
     return { rewards };
   });
@@ -151,20 +153,82 @@ export function gameRedeem(db, cfg, body, now = Date.now()) {
     if (row.redeemed_by != null) {
       // Reintento del mismo jugador (p. ej. el servidor cayó antes de entregar): devolver el mismo premio.
       if (row.redeemed_by === p.userId) {
-        const rw = db.prepare("SELECT id, tier, status FROM rewards WHERE id = ?").get(row.reward_id);
-        if (rw && rw.status === "pending") return { ok: true, reward: { id: rw.id, userId: p.userId, tier: rw.tier } };
+        const rw = db.prepare("SELECT id, tier, status, source FROM rewards WHERE id = ?").get(row.reward_id);
+        if (rw && rw.status === "pending") return { ok: true, reward: { id: rw.id, userId: p.userId, tier: rw.tier, source: rw.source } };
       }
       return { ok: false, error: "used" };
     }
     if (row.expires_at <= now) return { ok: false, error: "expired" };
-    if (cfg.minLevel > 0 && !(p.level >= cfg.minLevel)) return { ok: false, error: "level", minLevel: cfg.minLevel };
-    if (countToday(db, p.userId, row.tier, day) >= (cfg.maxPerDay[row.tier] ?? 0)) return { ok: false, error: "capped" };
+    // Los códigos generados en el panel (sorteos, Discord…) no piden nivel ni cuentan para el tope.
+    const fromAdmin = row.origin === "admin";
+    if (!fromAdmin) {
+      if (cfg.minLevel > 0 && !(p.level >= cfg.minLevel)) return { ok: false, error: "level", minLevel: cfg.minLevel };
+      if (countToday(db, p.userId, row.tier, day) >= (cfg.maxPerDay[row.tier] ?? 0)) return { ok: false, error: "capped" };
+    }
+    const source = fromAdmin ? "admin" : "code";
     const id = newId();
-    db.prepare("INSERT INTO rewards (id, user_id, tier, source, day, created_at, code) VALUES (?, ?, ?, 'code', ?, ?, ?)")
-      .run(id, p.userId, row.tier, day, now, code);
+    db.prepare("INSERT INTO rewards (id, user_id, tier, source, day, created_at, code) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run(id, p.userId, row.tier, source, day, now, code);
     db.prepare("UPDATE codes SET redeemed_by = ?, redeemed_at = ?, reward_id = ? WHERE code = ?").run(p.userId, now, id, code);
-    return { ok: true, reward: { id, userId: p.userId, tier: row.tier } };
+    return { ok: true, reward: { id, userId: p.userId, tier: row.tier, source } };
   });
+}
+
+// ---------- Acciones del panel ----------
+const ALL_TIERS = new Set(TIERS.map((t) => t.key));
+const intIn = (v, min, max, def) => {
+  const n = Number(v);
+  return Number.isInteger(n) ? Math.min(max, Math.max(min, n)) : def;
+};
+
+// Códigos míticos o legendarios para sorteos. Un solo uso cada uno.
+export function adminCreateCodes(db, body, now = Date.now()) {
+  const tier = body?.tier;
+  if (!PRIZE_TIERS.has(tier)) return { ok: false, error: "bad_tier" };
+  const count = intIn(body?.count, 1, 50, 1);
+  const days = intIn(body?.days, 1, 30, 7);
+  const expiresAt = now + days * 86_400_000;
+  const codes = tx(db, () => {
+    const out = [];
+    const exists = db.prepare("SELECT 1 FROM codes WHERE code = ?");
+    const ins = db.prepare("INSERT INTO codes (code, tier, created_at, expires_at, visitor, origin) VALUES (?, ?, ?, ?, 'admin', 'admin')");
+    for (let i = 0; i < count; i++) {
+      let code;
+      do code = newCode(); while (exists.get(code));
+      ins.run(code, tier, now, expiresAt);
+      out.push(code);
+    }
+    return out;
+  });
+  return { ok: true, tier, codes, expiresAt };
+}
+
+export function adminListCodes(db, now = Date.now(), limit = 60) {
+  return db.prepare(`
+    SELECT c.code, c.tier, c.created_at AS createdAt, c.expires_at AS expiresAt, c.redeemed_at AS redeemedAt,
+           c.redeemed_by AS redeemedBy, p.name, p.display_name AS displayName
+    FROM codes c LEFT JOIN players p ON p.user_id = c.redeemed_by
+    WHERE c.origin = 'admin' ORDER BY c.created_at DESC LIMIT ?`).all(limit)
+    .map((r) => ({ ...r, status: r.redeemedBy != null ? "redeemed" : r.expiresAt <= now ? "expired" : "active" }));
+}
+
+// Regalo directo: N tiradas de mascota de una rareza al buzón del jugador. No cuenta para el tope.
+export function adminGift(db, cfg, body, now = Date.now()) {
+  const userId = Number(body?.userId);
+  if (!Number.isSafeInteger(userId) || userId <= 0) return { ok: false, error: "bad_user" };
+  const tier = body?.tier;
+  if (!ALL_TIERS.has(tier)) return { ok: false, error: "bad_tier" };
+  const count = intIn(body?.count, 1, 10, 1);
+  const player = db.prepare("SELECT user_id, name, display_name, played FROM players WHERE user_id = ?").get(userId);
+  if (!player) return { ok: false, error: "unknown_player" };
+  const day = dayKey(now, cfg.tzOffsetMin);
+  const ids = tx(db, () => {
+    const ins = db.prepare("INSERT INTO rewards (id, user_id, tier, source, day, created_at) VALUES (?, ?, ?, 'admin', ?, ?)");
+    const out = [];
+    for (let i = 0; i < count; i++) { const id = newId(); ins.run(id, userId, tier, day, now); out.push(id); }
+    return out;
+  });
+  return { ok: true, sent: ids.length, tier, player: { userId, name: player.name, displayName: player.display_name, played: Boolean(player.played) } };
 }
 
 // ---------- Visitas ----------
@@ -226,6 +290,7 @@ export function metrics(db, cfg, days = 30, now = Date.now()) {
       expired: one("SELECT COUNT(*) AS n FROM codes WHERE redeemed_by IS NULL AND expires_at <= ?", now),
       active: one("SELECT COUNT(*) AS n FROM codes WHERE redeemed_by IS NULL AND expires_at > ?", now),
       byTier: byTier("SELECT tier, COUNT(*) AS n FROM codes GROUP BY tier"),
+      fromAdmin: one("SELECT COUNT(*) AS n FROM codes WHERE origin = 'admin'"),
     },
     rewards: {
       pending: one("SELECT COUNT(*) AS n FROM rewards WHERE status = 'pending'"),

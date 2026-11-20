@@ -209,3 +209,62 @@ test("HTTP: búsqueda acepta usuario o nombre visible y prioriza a quien juega",
     assert.equal(roll.status, 200);
   }, fake);
 });
+
+// ---------- Panel: códigos y regalos ----------
+import { adminCreateCodes, adminGift, adminListCodes } from "../src/logic.js";
+
+test("panel: códigos del staff saltan nivel y tope, y son de un solo uso", () => {
+  const db = openDb(":memory:"); const c = cfg();
+  const t0 = Date.parse("2026-11-20T15:00:00Z");
+  assert.equal(adminCreateCodes(db, { tier: "epic", count: 1 }).error, "bad_tier");
+  const r = adminCreateCodes(db, { tier: "mythic", count: 3, days: 7 }, t0);
+  assert.equal(r.codes.length, 3);
+  r.codes.forEach((code) => assert.match(code, CODE_RE));
+  assert.equal(r.expiresAt, t0 + 7 * 86_400_000);
+  const p = { userId: 777, name: "Nuevo_Jugador", level: 1 };
+  // el jugador ya tiene sus 5 míticas del día por la página
+  gamePull(db, c, { players: [{ ...p, level: 50 }] }, t0);
+  for (let i = 0; i < 5; i++) doRoll(db, c, { mode: "user", userId: 777 }, t0, MYTHIC);
+  const a = gameRedeem(db, c, { ...p, code: r.codes[0] }, t0); // nivel 1 y tope lleno: igual entra
+  assert.equal(a.ok, true); assert.equal(a.reward.source, "admin");
+  assert.equal(gameRedeem(db, c, { userId: 778, name: "Otro_Jugador", level: 1, code: r.codes[0] }, t0).error, "used");
+  assert.equal(gameRedeem(db, c, { ...p, code: r.codes[1] }, t0 + 8 * 86_400_000).error, "expired");
+  const list = adminListCodes(db, t0);
+  assert.equal(list.length, 3);
+  assert.equal(list.find((x) => x.code === r.codes[0]).status, "redeemed");
+  assert.equal(list.find((x) => x.code === r.codes[0]).name, "Nuevo_Jugador");
+});
+
+test("panel: regalo directo llega aunque no tenga el nivel y no gasta el tope", () => {
+  const db = openDb(":memory:"); const c = cfg();
+  seedPlayer(db, c, { level: 2 });
+  assert.equal(adminGift(db, c, { userId: 999, tier: "mythic" }).error, "unknown_player");
+  assert.equal(adminGift(db, c, { userId: 111, tier: "dorado" }).error, "bad_tier");
+  const g = adminGift(db, c, { userId: 111, tier: "rare", count: 50 });
+  assert.equal(g.sent, 10); // tope por envío
+  adminGift(db, c, { userId: 111, tier: "mythic", count: 2 });
+  const pull = gamePull(db, c, { players: [{ userId: 111, name: "PepitoGamer", level: 2 }] });
+  assert.equal(pull.rewards.length, 12);
+  assert.ok(pull.rewards.every((x) => x.source === "admin"));
+  // sus 5 míticas diarias de la página siguen disponibles
+  seedPlayer(db, c, { level: 20 });
+  assert.equal(doRoll(db, c, { mode: "user", userId: 111 }, Date.now(), MYTHIC).remaining.mythic, 4);
+});
+
+test("HTTP: acciones del panel exigen sesión", async () => {
+  await withServer(async (base, db, c) => {
+    seedPlayer(db, c);
+    assert.equal((await fetch(`${base}/api/admin/codes`, json({ tier: "mythic", count: 1 }))).status, 401);
+    assert.equal((await fetch(`${base}/api/admin/gift`, json({ userId: 111, tier: "mythic" }))).status, 401);
+    const login = await fetch(`${base}/api/admin/login`, json({ user: "joseph", password: "clave-super-segura" }));
+    const cookie = login.headers.get("set-cookie").split(";")[0];
+    const codes = await (await fetch(`${base}/api/admin/codes`, json({ tier: "legendary", count: 2 }, { cookie }))).json();
+    assert.equal(codes.codes.length, 2);
+    const gift = await (await fetch(`${base}/api/admin/gift`, json({ userId: 111, tier: "mythic", count: 1 }, { cookie }))).json();
+    assert.equal(gift.ok, true);
+    const other = await fetch(`${base}/api/admin/gift`, json({ userId: 111, tier: "mythic" }, { cookie, origin: "https://malo.com" }));
+    assert.equal(other.status, 403);
+    const list = await (await fetch(`${base}/api/admin/codes`, { headers: { cookie } })).json();
+    assert.equal(list.codes.length, 2);
+  });
+});

@@ -146,6 +146,12 @@ Mientras `.env` no tenga `GAME_KEY` y `ADMIN_PASSWORD_HASH`, el despliegue autom
 | `MIN_LEVEL` | Nivel mínimo en el juego para recibir premios (quedan guardados hasta llegar) | 10 |
 | `CODE_TTL_HOURS` | Horas que dura un código sin canjear | 72 |
 
+### Acciones del panel
+
+- **Generar códigos** míticos o legendarios (1–50, vencen en 1–30 días). Son de un solo uso, **no piden nivel ni cuentan para el tope diario** (pensados para sorteos). Se listan con su estado (activo, canjeado por quién, vencido).
+- **Enviar regalo**: buscar al jugador por usuario o nombre visible y mandarle 1–10 tiradas de mascota de cualquier rareza. Llega al buzón como "Sky Eggs Team" (categoría Admin), aunque no tenga el nivel mínimo y sin gastar su tope. Cada acción queda en `docker logs skyeggs-api` (`[admin] …`).
+- El juego necesita la versión de `WebRewardService` con `Config.AdminMail` y las 6 rarezas (publicar el place).
+
 ### Seguridad
 
 - El resultado lo decide el servidor (`crypto.randomInt`); la página solo anima. Cambiar el JS no da premios.
