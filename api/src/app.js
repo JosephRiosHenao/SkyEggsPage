@@ -181,7 +181,7 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
 
     "GET /api/players/search": async (req, url) => {
       if (!limits.search.take(ipOf(req))) throw new HttpError(429, "slow_down");
-      return searchPlayers(db, url.searchParams.get("q") || "", { fetchImpl, timeoutMs: cfg.robloxTimeoutMs });
+      return searchPlayers(db, url.searchParams.get("q") || "", { fetchImpl, timeoutMs: cfg.robloxTimeoutMs, onlyPlayed: url.searchParams.get("played") === "1" });
     },
 
     "GET /api/players/remaining": async (req, url) => {

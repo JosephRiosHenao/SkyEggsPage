@@ -16,7 +16,8 @@
     already_approved: "Tu solicitud ya fue aprobada.",
     wait_after_reject: "Tu última solicitud fue rechazada. Puedes volver a aplicar 7 días después.",
     age_required: "Tienes que confirmar que tienes 13 años o más.",
-    bad_roblox: "Escribe tu usuario de Roblox (3 a 20 letras, números o _).",
+    pick_account: "Busca tu cuenta de Roblox y elígela de la lista.",
+    must_play: "Esa cuenta todavía no ha jugado Sky Eggs. Entra al juego, juega un rato y vuelve a intentarlo.",
     bad_email: "Ese correo no parece válido.",
     need_platform: "Agrega al menos una red con su enlace (https://…).",
     about_short: "Cuéntanos un poco más sobre ti (mínimo 20 letras).",
@@ -209,9 +210,15 @@
         el("label", {}, "Red", el("select", { name: `ptype${i}` }, ...["YouTube", "TikTok", "Twitch", "Kick", "Instagram", "Facebook", "Otra"].map((p) => el("option", {}, p)))),
         el("label", {}, "Enlace a tu perfil o canal", el("input", { name: `purl${i}`, type: "url", placeholder: "https://…", maxlength: "400", required: i === 0 })),
         el("label", {}, "Seguidores", el("input", { name: `pfol${i}`, type: "number", min: "0", placeholder: "0" })));
+      let account = null;
+      const accountBox = el("div");
+      const paintAccount = () => accountBox.replaceChildren(account
+        ? el("div", { class: "form" }, el("label", {}, "Tu cuenta de Roblox"), accountChip(account, () => { account = null; paintAccount(); }), el("p", { class: "hint" }, "Un moderador confirmará que esta es tu cuenta."))
+        : accountPicker((p) => { account = p; paintAccount(); }));
+      paintAccount();
       const form = el("form", { class: "form" },
-        el("label", {}, "Tu usuario de Roblox", el("input", { name: "robloxName", required: true, maxlength: "32", placeholder: "Ej: PepitoGamer" })),
-        el("p", { class: "hint" }, "Tu Discord ya lo tenemos: es la cuenta con la que entraste."),
+        accountBox,
+        el("p", { class: "hint" }, "Tu Discord ya lo tenemos: es la cuenta con la que entraste. Tienes que haber jugado Sky Eggs al menos una vez."),
         platformRow(0), platformRow(1), platformRow(2),
         el("label", {}, "Correo (opcional)", el("input", { name: "email", type: "email", maxlength: "120" })),
         el("label", {}, "Un video tuyo de ejemplo (opcional)", el("input", { name: "sampleUrl", type: "url", placeholder: "https://…" })),
@@ -222,7 +229,8 @@
         e.preventDefault();
         const f = new FormData(form);
         const platforms = [0, 1, 2].map((i) => ({ type: f.get(`ptype${i}`), url: f.get(`purl${i}`), followers: Number(f.get(`pfol${i}`)) || 0 })).filter((p) => p.url);
-        act(e.submitter, () => api("/api/creators/apply", { robloxName: f.get("robloxName"), email: f.get("email"), sampleUrl: f.get("sampleUrl"), about: f.get("about"), age13: f.get("age13") === "on", platforms }),
+        if (!account) return flash(ERRORS.pick_account, "bad");
+        act(e.submitter, () => api("/api/creators/apply", { robloxUserId: account.userId, email: f.get("email"), sampleUrl: f.get("sampleUrl"), about: f.get("about"), age13: f.get("age13") === "on", platforms }),
           "¡Solicitud enviada! Un moderador te escribirá por Discord.", async () => { me = await api("/api/me"); show("aplicar"); });
       });
       box.append(el("p", { class: "muted" }, "Un moderador revisa tu solicitud y te escribe por Discord para explicarte todo."), form);
@@ -339,33 +347,20 @@
       const box = el("div", { class: "box" }, el("h2", {}, "Mi cuenta de Roblox"));
       if (l.status === "approved") {
         box.append(el("p", {}, "✅ Vinculada con ", el("strong", {}, `@${l.roblox.name}`), ` (${l.roblox.displayName}).`),
-          el("p", { class: "muted" }, "Ya puedes quitar el código de tu perfil. Para cambiar de cuenta, habla con un moderador."));
+          el("p", { class: "muted" }, "Tus premios llegan al buzón de esta cuenta. Para cambiarla, habla con un moderador."));
         return s.replaceChildren(box);
       }
       if (l.status === "pending") {
-        box.append(el("div", { class: "notice" }, "En revisión. Haz esto para que el moderador pueda aprobarla:"),
-          el("ol", { class: "guide-inline" },
-            el("li", {}, "Copia este código: ", el("span", { class: "code-big" }, l.code)),
-            el("li", {}, "Ponlo en la descripción (Acerca de) de tu perfil de Roblox: ", link(`https://www.roblox.com/users/${l.roblox.userId}/profile`, `@${l.roblox.name}`), "."),
-            el("li", {}, "Avisa a un moderador en Discord. Cuando lo apruebe, ya puedes quitarlo.")));
+        box.append(el("div", { class: "notice" }, "En revisión: un moderador confirmará que esta es tu cuenta."),
+          accountChip({ ...l.roblox, avatar: null }));
       }
       if (l.status === "rejected") box.append(el("div", { class: "notice notice--bad" }, `La vinculación anterior fue rechazada${l.note ? `: ${l.note}` : "."} Puedes pedirla otra vez.`));
-      const picks = el("div", { class: "picks" });
-      const form = el("form", { class: "form" },
-        el("label", {}, l.status === "pending" ? "¿Te equivocaste de cuenta? Búscala otra vez" : "Busca tu cuenta (usuario o nombre visible)",
-          el("div", { class: "form-actions" }, el("input", { name: "q", required: true, minlength: "3", maxlength: "32", placeholder: "Ej: PepitoGamer" }), el("button", { class: "btn btn--sm btn--white", type: "submit" }, "Buscar"))));
-      form.addEventListener("submit", async (e) => {
-        e.preventDefault();
-        picks.replaceChildren(el("p", { class: "small muted" }, "Buscando…"));
-        try {
-          const r = await api(`/api/players/search?q=${encodeURIComponent(new FormData(form).get("q"))}`);
-          picks.replaceChildren(...(r.players.length ? r.players.map((p) => el("button", {
-            class: "pickrow", type: "button",
-            onclick: (ev) => act(ev.currentTarget, () => api("/api/creators/link", { userId: p.userId }), "Listo. Ahora pon el código en tu perfil de Roblox.", () => show("roblox")),
-          }, el("img", { src: p.avatar || "/img/icon-192.png", alt: "" }), el("span", {}, el("strong", {}, p.displayName), ` @${p.name}${p.played ? " · juega Sky Eggs" : ""}`))) : [el("p", { class: "empty" }, "No encontramos esa cuenta.")]));
-        } catch (err) { picks.replaceChildren(el("p", { class: "notice notice--bad" }, errText(err))); }
-      });
-      box.append(form, picks);
+      box.append(
+        el("p", { class: "muted mt" }, l.status === "pending" ? "¿Te equivocaste de cuenta? Elige la correcta:" : "Elige tu cuenta de Roblox. Tiene que haber jugado Sky Eggs al menos una vez."),
+        accountPicker((p) => {
+          if (!confirm(`¿Vincular @${p.name}? Un moderador confirmará que es tu cuenta.`)) return;
+          act(document.activeElement, () => api("/api/creators/link", { userId: p.userId }), "Listo. Un moderador confirmará que es tu cuenta.", () => show("roblox"));
+        }, "Busca tu cuenta (usuario o nombre visible)"));
       s.replaceChildren(box);
     },
 
@@ -434,6 +429,37 @@
     },
   };
 
+  // Buscador de cuenta: solo jugadores que ya entraron a Sky Eggs (como el del huevo de la página).
+  const GAME_URL = "https://www.roblox.com/es/games/77372347150746/Huevos-del-cielo";
+  function accountPicker(onPick, label = "Busca tu cuenta de Roblox (usuario o nombre visible)") {
+    const results = el("div", { class: "picks" });
+    const input = el("input", { required: true, minlength: "3", maxlength: "32", placeholder: "Ej: PepitoGamer", autocomplete: "off" });
+    const search = async () => {
+      const q = input.value.trim().replace(/^@/, "");
+      if (q.length < 3) return results.replaceChildren(el("p", { class: "small muted" }, "Escribe al menos 3 letras."));
+      results.replaceChildren(el("p", { class: "small muted" }, "Buscando…"));
+      try {
+        const r = await api(`/api/players/search?played=1&q=${encodeURIComponent(q)}`);
+        if (!r.players.length) {
+          return results.replaceChildren(el("div", { class: "notice" },
+            "No encontramos esa cuenta entre los jugadores de Sky Eggs. Tienes que jugar Sky Eggs al menos una vez antes de aplicar: entra, juega unos minutos y vuelve aquí. ",
+            el("a", { href: GAME_URL, target: "_blank", rel: "noopener" }, "Jugar Sky Eggs")));
+        }
+        results.replaceChildren(el("p", { class: "small muted" }, r.players.length === 1 ? "¿Eres tú?" : "¿Cuál eres tú?"),
+          ...r.players.map((p) => el("button", { class: "pickrow", type: "button", onclick: () => { results.replaceChildren(); onPick(p); } },
+            el("img", { src: p.avatar || "/img/icon-192.png", alt: "" }),
+            el("span", {}, el("strong", {}, p.displayName), ` @${p.name}`), el("span", { class: "pick__go" }, "¡Soy yo!"))));
+      } catch (e) { results.replaceChildren(el("p", { class: "notice notice--bad" }, errText(e))); }
+    };
+    const go = el("button", { class: "btn btn--sm btn--white", type: "button", onclick: search }, "Buscar");
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); search(); } });
+    return el("div", { class: "form" }, el("label", {}, label, el("div", { class: "form-actions" }, input, go)), results);
+  }
+  const accountChip = (p, onChange) => el("div", { class: "pickrow", role: "group" },
+    el("img", { src: p.avatar || "/img/icon-192.png", alt: "" }),
+    el("span", {}, el("strong", {}, p.displayName), ` @${p.name}`),
+    onChange ? el("button", { class: "linkbtn", type: "button", onclick: onChange }, "Cambiar") : null);
+
   const BONUS_LABEL = { pending_mod: "Espera moderador", pending_admin: "Espera al admin", approved: "Aprobado (por pagar)", paid: "Pagado", rejected: "Rechazado" };
   const SPECIAL_LABEL = { pending: "En revisión", approved: "Aprobado", rejected: "Rechazado", done: "Hecho" };
   const tierText = (rarity) => ({ Epic: "épica", Legendary: "legendaria", Mythic: "mítica" }[rarity] || rarity);
@@ -446,6 +472,11 @@
 
   // ---------- Moderación: vistas ----------
   const userLine = (u) => (u ? `${u.globalName || u.username} · Discord @${u.username}` : "usuario desconocido");
+  const day2 = (t) => new Date(t).toLocaleDateString("es-CO", { day: "numeric", month: "short", year: "numeric" });
+  // Cuenta de Roblox elegida por el creador, con lo que sabemos de ella por el juego.
+  const robloxLine = (id, name, display, player) => el("p", { class: "item__meta" }, "Roblox: ",
+    link(`https://www.roblox.com/users/${id}/profile`, `@${name}${display && display !== name ? ` (${display})` : ""}`),
+    ` · id ${id}`, player ? ` · juega desde ${day2(player.firstSeen)} · nivel ${player.level ?? "?"} · última vez ${day2(player.lastSeen)}` : "");
   const refreshMod = () => show("moderacion");
   const noteInput = (ph = "Nota (se guarda en el registro)") => el("input", { class: "wide", placeholder: ph, maxlength: "500" });
   const btn = (text, cls, fn) => el("button", { class: `btn btn--mini ${cls}`, type: "button", onclick: (e) => fn(e.currentTarget) }, text);
@@ -456,14 +487,15 @@
       const note = noteInput();
       return el("article", { class: "item" },
         el("div", { class: "item__head" }, el("span", { class: "item__title" }, `${userLine(a.user)}`), pill(a.status, a.status === "contacted" ? "Contactado" : "Nueva")),
-        el("p", { class: "item__meta" }, `Roblox: ${a.roblox_name}${a.email ? ` · ${a.email}` : ""} · enviada ${when(a.created_at)}`),
+        a.roblox_user_id ? robloxLine(a.roblox_user_id, a.roblox_name, null, a.player) : el("p", { class: "item__meta" }, `Roblox: ${a.roblox_name}`),
+        el("p", { class: "item__meta" }, `${a.email ? `${a.email} · ` : ""}enviada ${when(a.created_at)}`),
         el("ul", { class: "item__meta" }, ...a.platforms.map((p) => el("li", {}, `${p.type}: `, link(p.url, p.url), p.followers ? ` · ${n(p.followers)} seguidores` : ""))),
         a.sample_url ? el("p", { class: "item__meta" }, "Video de ejemplo: ", link(a.sample_url, a.sample_url)) : null,
         el("p", { class: "item__meta" }, a.about),
         a.review_note ? el("p", { class: "item__meta" }, `Nota (${a.reviewed_by}): ${a.review_note}`) : null,
         el("div", { class: "item__actions" }, note,
           a.status === "pending" ? btn("Contactado", "btn--white", (b) => act(b, () => api("/api/mod/application", { id: a.id, action: "contacted", note: note.value }), "Marcada como contactada.", refreshMod)) : null,
-          btn("Aprobar", "btn--green", (b) => act(b, () => api("/api/mod/application", { id: a.id, action: "approve", note: note.value }), "Aprobada. Dale el rol de Content Creator en Discord y ;SetCreator en el juego.", refreshMod)),
+          btn("Aprobar (y confirmar su Roblox)", "btn--green", (b) => act(b, () => api("/api/mod/application", { id: a.id, action: "approve", note: note.value }), (o) => `Aprobada${o.linked ? " y cuenta de Roblox vinculada" : ""}. Dale el rol de Content Creator en Discord.`, refreshMod)),
           btn("Rechazar", "btn--red", (b) => { if (!note.value.trim()) return flash("Escribe el motivo en la nota.", "bad"); act(b, () => api("/api/mod/application", { id: a.id, action: "reject", note: note.value }), "Rechazada.", refreshMod); })));
     });
     body.replaceChildren(...(items.length ? [el("div", { class: "list" }, ...items)] : [empty("No hay solicitudes pendientes.")]));
@@ -473,9 +505,9 @@
     const items = queue.links.map((c) => {
       const note = noteInput();
       return el("article", { class: "item" },
-        el("div", { class: "item__head" }, el("span", { class: "item__title" }, userLine(c.user)), el("span", { class: "code-big" }, c.link_code)),
-        el("p", { class: "item__meta" }, "Roblox: ", link(`https://www.roblox.com/users/${c.roblox_user_id}/profile`, `@${c.roblox_name} (${c.roblox_display})`), ` · id ${c.roblox_user_id} · pedido ${when(c.link_requested_at)}`),
-        el("p", { class: "item__meta" }, "Abre el perfil y comprueba que el código esté en la descripción."),
+        el("div", { class: "item__head" }, el("span", { class: "item__title" }, userLine(c.user)), pill("pending", "Confirmar cuenta")),
+        robloxLine(c.roblox_user_id, c.roblox_name, c.roblox_display, c.player),
+        el("p", { class: "item__meta" }, `Pedido ${when(c.link_requested_at)}. Confirma con el creador (por Discord o en el juego) que esa es su cuenta.`),
         el("div", { class: "item__actions" }, note,
           btn("Aprobar", "btn--green", (b) => act(b, () => api("/api/mod/link", { discordId: c.discord_id, action: "approve", note: note.value }), "Vinculación aprobada.", refreshMod)),
           btn("Rechazar", "btn--red", (b) => { if (!note.value.trim()) return flash("Escribe el motivo en la nota.", "bad"); act(b, () => api("/api/mod/link", { discordId: c.discord_id, action: "reject", note: note.value }), "Vinculación rechazada.", refreshMod); })));
