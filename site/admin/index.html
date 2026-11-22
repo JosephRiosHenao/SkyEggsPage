@@ -19,6 +19,7 @@
         <label>Contraseña <input name="password" id="login-pass" type="password" autocomplete="current-password" required maxlength="256"></label>
         <button type="submit">Entrar</button>
         <p class="login__err" id="login-err" role="alert"></p>
+        <a class="btnlink" href="/api/auth/discord/login?next=/admin/">Entrar con Discord (rol admin)</a>
       </form>
     </section>
 
@@ -35,6 +36,7 @@
             </select>
           </label>
           <button type="button" id="refresh">Actualizar</button>
+          <a class="ghost btnlink" href="/creadores/panel/#moderacion">Creadores</a>
           <button type="button" id="logout" class="ghost">Salir</button>
         </div>
       </header>

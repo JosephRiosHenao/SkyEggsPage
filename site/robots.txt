@@ -2,5 +2,6 @@ User-agent: *
 Allow: /
 Disallow: /admin/
 Disallow: /api/
+Disallow: /creadores/panel/
 
 Sitemap: __SITE_URL__/sitemap.xml

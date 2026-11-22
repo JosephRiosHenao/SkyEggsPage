@@ -166,6 +166,39 @@ Mientras `.env` no tenga `GAME_KEY` y `ADMIN_PASSWORD_HASH`, el despliegue autom
 docker run --rm -v skyeggspage_skyeggs-data:/data -v "$PWD":/out alpine sh -c 'cp /data/skyeggs.db /out/skyeggs-$(date +%F).db'
 ```
 
+## 7. Programa de creadores (login con Discord)
+
+Página pública `https://skyeggs.pro/creadores/` y panel `https://skyeggs.pro/creadores/panel/`. Los roles salen del servidor de Discord de Sky Eggs: admin `1560889139375898775`, moderador `1563742282392543312`, creador `1561051688125730897`. La página no necesita bot: lee los roles con el permiso `guilds.members.read` del propio usuario al entrar.
+
+### Crear la aplicación de Discord (una vez)
+
+1. Entra a https://discord.com/developers/applications → **New Application** (nombre: "Sky Eggs Creadores").
+2. **OAuth2** → copia **Client ID** y pulsa **Reset Secret** para copiar el **Client Secret**.
+3. En **OAuth2 → Redirects** agrega exactamente: `https://skyeggs.pro/api/auth/discord/callback`
+4. En Discord: Ajustes de usuario → Avanzado → **Modo desarrollador**. Clic derecho en el servidor de Sky Eggs → **Copiar ID del servidor**.
+5. (Opcional) En un canal privado de moderadores: Editar canal → Integraciones → **Webhooks** → Nuevo webhook → Copiar URL.
+
+### En el servidor
+
+```bash
+cd /opt/skyeggspage
+nano .env      # DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, DISCORD_GUILD_ID y, si quieres, DISCORD_WEBHOOK_URL
+docker compose up -d skyeggs-api
+```
+
+Prueba: abre `https://skyeggs.pro/creadores/panel/`, entra con Discord y comprueba que salen tus insignias (Admin). Si dice "El login con Discord todavía no está configurado", falta alguna de las tres primeras variables.
+
+### Cómo funciona
+
+- **Aspirante** (sin rol): llena la solicitud. **Moderador**: la revisa, contacta, aprueba o rechaza. Al aprobar, el moderador le da el rol de Content Creator en Discord y `;SetCreator <usuario> Creator` en el juego.
+- **Creador**: vincula su Roblox (código `SKY-…` en la descripción del perfil; lo aprueba un moderador), sube evidencias (enlace + captura opcional), ve sus metas y reclama **1 pack por semana** (hasta 3 días después del domingo) y **1 por mes** (hasta 5 días después). El juego entrega el pack al buzón con `CreatorService.SendReward` (mismo id `cr-<periodo>-<userId>`: no se duplica con `;CreatorReward`).
+- **Bono de Robux** (≥ 10.000 vistas, 100 R$ por cada 10.000, máx. 1.000 por video): moderador → admin (persona distinta) → el admin paga por el grupo y marca "Pagado".
+- **Pedido especial** (≥ 100.000 vistas aprobadas en el mes): solo el admin lo resuelve.
+- Cada acción de staff queda en `audit` con nombre, rol, hora y detalles (pestaña Registro).
+- Las capturas se guardan en el volumen (`/data/uploads`) y solo las ven su dueño y el staff.
+- Packs y niveles: `api/src/program.js`. Deben coincidir con `CreatorServiceConfig.Packs` del juego.
+- **Vistas automáticas** (`api/src/views.js`): la imagen trae **yt-dlp** (en `/opt/ytdlp`, se actualiza solo cada día). Lee YouTube, TikTok, Twitch y Kick sin claves y refresca cada `VIEWS_REFRESH_HOURS` (6) mientras el video cuente para un reclamo. Solo se consultan esos dominios por https (sin extractor genérico). Si YouTube bloquea la IP del VPS, `YOUTUBE_API_KEY` (gratis) sirve de respaldo. `VIEWS_AUTO=false` lo apaga. Para ver qué pasa: `docker logs skyeggs-api | grep views`.
+
 ## Problemas comunes
 
 - **Certificado no se emite:** el DNS aún no apunta al servidor o el puerto 80 está cerrado (el reto HTTP de Let's Encrypt lo necesita).

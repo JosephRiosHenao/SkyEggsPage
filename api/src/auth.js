@@ -23,18 +23,27 @@ export function safeEqual(a, b) {
 const sha = (s) => createHash("sha256").update(s).digest("hex");
 export const SESSION_MS = 12 * 3_600_000;
 export const COOKIE = "se_admin";
+export const USER_COOKIE = "se_user";
+export const USER_SESSION_MS = 8 * 3_600_000;
 
-export function createSession(db, now = Date.now()) {
+export function createSession(db, now = Date.now(), kind = "admin", discordId = null, ttlMs = SESSION_MS) {
   const token = randomBytes(32).toString("base64url");
   db.prepare("DELETE FROM sessions WHERE expires_at <= ?").run(now);
-  db.prepare("INSERT INTO sessions (token_hash, created_at, expires_at) VALUES (?, ?, ?)").run(sha(token), now, now + SESSION_MS);
+  db.prepare("INSERT INTO sessions (token_hash, created_at, expires_at, kind, discord_id) VALUES (?, ?, ?, ?, ?)")
+    .run(sha(token), now, now + ttlMs, kind, discordId);
   return token;
 }
 
+// Devuelve la fila de la sesión (kind, discord_id) o null.
+export function getSession(db, token, kind, now = Date.now()) {
+  if (!token || token.length > 100) return null;
+  const row = db.prepare("SELECT kind, discord_id, expires_at FROM sessions WHERE token_hash = ?").get(sha(token));
+  if (!row || row.expires_at <= now || (kind && row.kind !== kind)) return null;
+  return row;
+}
+
 export function checkSession(db, token, now = Date.now()) {
-  if (!token || token.length > 100) return false;
-  const row = db.prepare("SELECT expires_at FROM sessions WHERE token_hash = ?").get(sha(token));
-  return Boolean(row && row.expires_at > now);
+  return Boolean(getSession(db, token, "admin", now));
 }
 
 export function deleteSession(db, token) {

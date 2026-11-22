@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Mi panel · Creadores de Sky Eggs</title>
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="stylesheet" href="/css/styles.css?v=__ASSET_V__">
+  <link rel="stylesheet" href="/creadores/creadores.css?v=__ASSET_V__">
+</head>
+<body class="panel">
+  <header class="nav">
+    <a class="nav__logo" href="/creadores/" aria-label="Programa de creadores">
+      <img src="/favicon-32.png" width="32" height="32" alt="">
+      <span>Creadores</span>
+    </a>
+    <div class="who" id="who" hidden>
+      <img id="who-pic" src="/img/icon-192.png" alt="">
+      <span id="who-name"></span>
+      <span class="badges" id="who-badges"></span>
+      <button class="linkbtn" type="button" id="logout">Salir</button>
+    </div>
+  </header>
+
+  <main class="panel-main" id="contenido">
+    <div id="flash" role="status" aria-live="polite"></div>
+
+    <!-- Sin sesión -->
+    <section class="box login-card" id="view-login" hidden>
+      <img src="/img/icon-192.png" width="96" height="96" alt="">
+      <h1 class="section-title">Entra con Discord</h1>
+      <p class="muted">Con tu cuenta de Discord vemos tu rol en el servidor de Sky Eggs: aspirante, creador, moderador o admin.</p>
+      <p class="mt"><a class="btn btn--discord btn--lg" id="login-btn" href="/api/auth/discord/login?next=/creadores/panel/">Entrar con Discord</a></p>
+      <p class="small muted mt">Solo leemos tu nombre, tu foto y tus roles en nuestro servidor. Nada más.</p>
+    </section>
+
+    <!-- Con sesión -->
+    <div id="view-app" hidden>
+      <nav class="tabs" id="tabs" role="tablist" aria-label="Secciones del panel"></nav>
+
+      <section data-tab="inicio" hidden></section>
+      <section data-tab="aplicar" hidden></section>
+      <section data-tab="metas" hidden></section>
+      <section data-tab="evidencias" hidden></section>
+      <section data-tab="roblox" hidden></section>
+      <section data-tab="bonos" hidden></section>
+      <section data-tab="comandos" hidden></section>
+      <section data-tab="moderacion" hidden></section>
+
+      <section data-tab="guia" class="guide" hidden>
+        <div class="box">
+          <h2>Guía para creadores</h2>
+          <ol>
+            <li><strong>Únete al Discord de Sky Eggs</strong> y entra aquí con esa cuenta.</li>
+            <li><strong>Aplica</strong> en la pestaña “Aplicar”: tu usuario de Roblox, dónde publicas (con enlaces) y por qué quieres entrar.</li>
+            <li><strong>Espera el mensaje de un moderador</strong> por Discord. Te explica el programa, te da el rol de Content Creator y el nivel Creator en el juego.</li>
+            <li><strong>Sal y vuelve a entrar</strong> en esta página para que lea tu rol nuevo. Aparecen las pestañas Metas, Evidencias, Mi Roblox y Bonos.</li>
+            <li><strong>Vincula tu Roblox</strong> en “Mi Roblox”: busca tu cuenta, copia el código <code>SKY-…</code> y ponlo en la descripción (Acerca de) de tu perfil de Roblox. Un moderador lo comprueba y aprueba; después puedes quitarlo.</li>
+            <li><strong>Graba y publica</strong> un video o directo de Sky Eggs en tus redes.</li>
+            <li><strong>Sube la evidencia</strong> en “Evidencias”: enlace, fecha de publicación y, si puedes, una captura de las estadísticas. Cada enlace se sube una sola vez.</li>
+            <li><strong>Un moderador la revisa.</strong> En YouTube, TikTok, Twitch y Kick las vistas se leen y se actualizan solas mientras el video cuente para un reclamo. En otras redes el moderador escribe las vistas; si siguen subiendo, toca “Pedir recuento”.</li>
+            <li><strong>Mira tus metas</strong> en “Metas” y reclama cuando quieras: una vez por semana (hasta 3 días después del domingo) y una vez por mes (hasta 5 días después de que termine).</li>
+            <li><strong>Entra al juego</strong> y abre el buzón del Lobby: ahí está tu premio. Si el pack sube tu nivel, en el juego sube solo; el rol de Discord te lo pone un moderador.</li>
+            <li><strong>¿Un video pasó las 10.000 vistas?</strong> Pide el bono de Robux desde la evidencia. ¿Más de 100.000 en el mes? Haz tu pedido especial en “Bonos”.</li>
+          </ol>
+        </div>
+        <div class="box" data-role="mod">
+          <h2>Guía para moderadores</h2>
+          <ol>
+            <li><strong>Entra con Discord.</strong> Con el rol de moderador aparece la pestaña “Moderación”; el número rojo es lo que falta por revisar.</li>
+            <li><strong>Solicitudes:</strong> abre sus redes, escríbele por Discord (su usuario sale en la tarjeta) y marca “Contactado”. Después “Aprobar” o “Rechazar”, siempre con una nota.</li>
+            <li><strong>Al aprobar:</strong> dale el rol <em>Content Creator</em> en Discord, en el juego usa <code>;SetCreator &lt;usuario&gt; Creator</code> y pásale esta guía. Dile que salga y vuelva a entrar al panel.</li>
+            <li><strong>Vinculaciones:</strong> abre su perfil de Roblox desde la tarjeta y comprueba que el código <code>SKY-…</code> esté en la descripción. Si está, “Aprobar”. El juego le da el nivel Creator solo cuando se conecte.</li>
+            <li><strong>Evidencias:</strong> abre el enlace y comprueba que sea de Sky Eggs, de ese creador (mira el canal que leyó la página) y con la fecha correcta. Si la página leyó las vistas, usa “Aprobar con vistas automáticas”: se actualizan solas. Si no pudo (Instagram, Facebook o la red bloqueó la lectura), escribe las vistas y “Aprobar con vistas fijas”. Si no cumple, “Rechazar” con el motivo.</li>
+            <li><strong>Revisar vistas:</strong> salen en la misma lista los recuentos que piden los creadores y los videos cuya lectura automática falló varias veces. Toca “Volver a leer” o escribe las vistas y “Fijar vistas”.</li>
+            <li><strong>Bonos de Robux:</strong> mira si las vistas son reales (picos raros, sin comentarios = sospecha). Si todo cuadra, “Aprobar”: pasa al admin para la aprobación final.</li>
+            <li><strong>Ascensos:</strong> el nivel en el juego sube solo cuando el creador reclama. Tú le pones el rol de Discord del nivel nuevo (mira “Creadores” en Moderación).</li>
+            <li><strong>Reglas:</strong> no puedes revisar tus propias cosas. Vistas compradas o abuso de comandos: rechaza, avisa al admin y, si hace falta, <code>;SetCreator &lt;usuario&gt; None</code>.</li>
+            <li><strong>Todo queda en el “Registro”</strong> con tu nombre, la hora y lo que cambiaste.</li>
+          </ol>
+        </div>
+        <div class="box" data-role="admin">
+          <h2>Guía para el admin</h2>
+          <ol>
+            <li><strong>Tienes todo lo de moderador</strong> y además “Bonos (admin)” y “Pedidos especiales”.</li>
+            <li><strong>Bonos de Robux:</strong> la aprobación final es tuya y tiene que haberla aprobado antes otra persona. Paga desde el grupo de Roblox y marca “Pagado”.</li>
+            <li><strong>Pedidos especiales (100.000+ vistas al mes):</strong> habla con el creador, acuerda algo justo y que no rompa las reglas, y márcalo “Aprobado” y después “Hecho”.</li>
+            <li><strong>Elite:</strong> coordina el mes de Admin Abuse con quien reclame el pack mensual.</li>
+            <li><strong>Métricas, códigos y regalos</strong> siguen en <a href="/admin/">el panel de métricas</a>.</li>
+          </ol>
+        </div>
+      </section>
+    </div>
+  </main>
+  <script src="/creadores/panel/panel.js?v=__ASSET_V__" defer></script>
+</body>
+</html>

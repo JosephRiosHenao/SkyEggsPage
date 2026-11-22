@@ -8,6 +8,7 @@ Landing estática del juego de Roblox **Sky Eggs (Huevos del cielo)**. Público:
   - `index.html`, `css/styles.css`, `js/main.js` (huevo interactivo).
   - `img/`: imágenes en WebP; `fonts/`: Lilita One y Baloo 2 auto-alojadas.
   - `__SITE_URL__` en HTML, `robots.txt` y `sitemap.xml` se reemplaza al construir la imagen (build arg `SITE_URL`).
+- `site/creadores/`: página pública del Programa de Creadores (`index.html`) y panel con login de Discord (`panel/`). Estilos en `creadores.css`. Sin `style=` en línea (la CSP lo bloquea): usar clases o `el.style` desde JS.
 - `site/admin/`: panel de métricas con login (datos de `/api/admin/*`). `noindex`.
 - `api/`: API de "Prueba tu suerte" (Node 22 sin dependencias + `node:sqlite`). Sorteo en el servidor, búsqueda de cuenta por usuario o nombre visible, modo buzón y modo código, endpoints del juego (`/api/game/pull|ack|redeem` con `X-Game-Key`) y panel. Pruebas: `cd api && npm test`. Ver `DEPLOY.md` §6.
 - `Dockerfile` + `docker/`: nginx con caché, gzip y cabeceras de seguridad. `/healthz` responde `ok`.
@@ -34,6 +35,12 @@ Seguir `DEPLOY.md` paso a paso. Resumen:
 4. Para el despliegue automático: clave SSH de despliegue, secrets `SSH_HOST`/`SSH_USER`/`SSH_KEY` y variable `DEPLOY_ENABLED=true` (y `SITE_URL=https://skyeggs.pro`, opcional) en GitHub.
 
 No tocar otros contenedores ni la configuración de un Traefik existente sin confirmarlo con el dueño.
+
+## Programa de creadores
+
+- Tres actores con roles de Discord: admin (1 persona), moderadores y creadores; los aspirantes no tienen rol. API en `api/src/creators.js` (reglas), `discord.js` (OAuth) y `program.js` (niveles, packs, bono de Robux). Todo cambio de staff pasa por `audit()`.
+- Los packs de `program.js` tienen que coincidir con `CreatorServiceConfig.Packs` del juego. El texto de la página pública (`site/creadores/index.html`) también los repite: actualizar los tres a la vez.
+- Guía para cada actor: pestaña "Guía" del panel y `docs/GUIA-PROGRAMA-CREADORES.md`.
 
 ## Conexión con el juego
 
