@@ -28,7 +28,28 @@ export const config = {
   // Cabecera con la IP real del visitante (Traefik pone X-Real-Ip).
   ipHeader: (process.env.IP_HEADER || "x-real-ip").toLowerCase(),
   robloxTimeoutMs: int("ROBLOX_TIMEOUT_MS", 4000),
+  siteUrl: (process.env.SITE_URL || `https://${process.env.DOMAIN || "skyeggs.pro"}`).replace(/\/$/, ""),
+  uploadsDir: process.env.UPLOADS_DIR || "/data/uploads",
+  // Login con Discord y roles del servidor de Discord del juego.
+  discord: {
+    clientId: process.env.DISCORD_CLIENT_ID || "",
+    clientSecret: process.env.DISCORD_CLIENT_SECRET || "",
+    guildId: process.env.DISCORD_GUILD_ID || "",
+    redirectUri: process.env.DISCORD_REDIRECT_URI || "",
+    webhookUrl: process.env.DISCORD_WEBHOOK_URL || "",
+    roles: {
+      admin: process.env.DISCORD_ROLE_ADMIN || "1560889139375898775",
+      moderator: process.env.DISCORD_ROLE_MODERATOR || "1563742282392543312",
+      creator: process.env.DISCORD_ROLE_CREATOR || "1561051688125730897",
+    },
+  },
+  creators: {
+    // Días después de cerrar la semana / el mes para reclamar su pack.
+    claimGraceDaysWeek: int("CLAIM_GRACE_DAYS_WEEK", 3),
+    claimGraceDaysMonth: int("CLAIM_GRACE_DAYS_MONTH", 5),
+  },
 };
+if (!config.discord.redirectUri) config.discord.redirectUri = `${config.siteUrl}/api/auth/discord/callback`;
 
 // Probabilidades en millonésimas (suman 1.000.000). Iguales a las de la página.
 export const TIERS = [

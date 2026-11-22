@@ -121,13 +121,17 @@ export function gamePull(db, cfg, body, now = Date.now()) {
   return tx(db, () => {
     db.prepare("INSERT INTO server_days (day, job_id) VALUES (?, ?) ON CONFLICT(day, job_id) DO UPDATE SET pulls = pulls + 1")
       .run(day, jobId);
-    const pending = db.prepare("SELECT id, user_id AS userId, tier, source FROM rewards WHERE user_id = ? AND status = 'pending' ORDER BY created_at LIMIT 20");
+    const pending = db.prepare("SELECT id, user_id AS userId, tier, source, kind, pack, period FROM rewards WHERE user_id = ? AND status = 'pending' ORDER BY created_at LIMIT 20");
     const rewards = [];
     for (const p of players) {
       upsertGamePlayer(db, p, day, now);
       const lowLevel = cfg.minLevel > 0 && !(p.level >= cfg.minLevel);
-      // Por debajo del nivel mínimo solo llegan los regalos del staff.
-      for (const r of pending.all(p.userId)) if (!lowLevel || r.source === "admin") rewards.push(r);
+      // Por debajo del nivel mínimo solo llegan los regalos del staff y lo del programa de creadores.
+      for (const r of pending.all(p.userId)) {
+        if (lowLevel && r.source !== "admin" && r.source !== "creator") continue;
+        if (r.kind === "pet") { delete r.kind; delete r.pack; delete r.period; }
+        rewards.push(r);
+      }
     }
     return { rewards };
   });

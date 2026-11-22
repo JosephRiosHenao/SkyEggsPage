@@ -114,3 +114,5 @@ select, input { min-height: 38px; padding: 0 .6rem; border-radius: 9px; border: 
 .gift-to { margin: .6rem 0 0; font-weight: 600; }
 .ok { color: var(--text-primary); font-weight: 600; }
 .err { color: var(--danger); font-weight: 600; }
+
+.btnlink { display: inline-flex; align-items: center; min-height: 38px; padding: 0 1rem; border-radius: 9px; border: 1px solid var(--border); color: var(--text-primary); text-decoration: none; font-weight: 600; }
