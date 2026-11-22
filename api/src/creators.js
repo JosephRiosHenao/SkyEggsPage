@@ -1,6 +1,6 @@
 // Programa de creadores: solicitudes, vinculación con Roblox, evidencias, reclamos,
 // bonos de Robux, pedidos especiales y registro de acciones (quién hizo qué).
-import { randomInt, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { tx } from "./db.js";
 import { PACK_BY_KEY, bestPack, robuxFor, SPECIAL } from "./program.js";
 import { trackableSite } from "./views.js";
@@ -85,8 +85,7 @@ export function submitApplication(db, discordId, body, now = Date.now()) {
   if (last && last.status === "approved") throw new Fail("already_approved");
   if (last && last.status === "rejected" && now - (last.reviewed_at || last.created_at) < 7 * 86400_000) throw new Fail("wait_after_reject");
   if (body?.age13 !== true) throw new Fail("age_required");
-  const robloxName = str(body?.robloxName, 32);
-  if (!/^[A-Za-z0-9_ ]{3,32}$/.test(robloxName)) throw new Fail("bad_roblox");
+  const player = playedPlayer(db, body?.robloxUserId);
   const email = str(body?.email, 120);
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Fail("bad_email");
   const platforms = (Array.isArray(body?.platforms) ? body.platforms : []).slice(0, 6).map((p) => ({
@@ -98,37 +97,41 @@ export function submitApplication(db, discordId, body, now = Date.now()) {
   const about = textBlock(body?.about, 1000);
   if (about.length < 20) throw new Fail("about_short");
   const sampleUrl = httpUrl(body?.sampleUrl);
-  const info = db.prepare("INSERT INTO applications (discord_id, roblox_name, email, platforms, about, sample_url, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
-    .run(String(discordId), robloxName, email || null, JSON.stringify(platforms), about, sampleUrl || null, now);
+  const info = db.prepare("INSERT INTO applications (discord_id, roblox_name, roblox_user_id, email, platforms, about, sample_url, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+    .run(String(discordId), player.name, player.user_id, email || null, JSON.stringify(platforms), about, sampleUrl || null, now);
   return { ok: true, id: Number(info.lastInsertRowid) };
 }
 
 // ---------- Vinculación Discord ↔ Roblox ----------
-const CODE_ALPHA = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
-function linkCode() { let s = "SKY-"; for (let i = 0; i < 6; i++) s += CODE_ALPHA[randomInt(0, CODE_ALPHA.length)]; return s; }
+// Solo cuentas que el juego ya vio conectadas: así sabemos que existen y que juegan.
+// El creador elige su cuenta de la lista y un moderador confirma que es la suya.
+function playedPlayer(db, userId) {
+  userId = Number(userId);
+  if (!Number.isSafeInteger(userId) || userId <= 0) throw new Fail("pick_account");
+  const p = db.prepare("SELECT user_id, name, display_name, played FROM players WHERE user_id = ?").get(userId);
+  if (!p || !p.played) throw new Fail("must_play");
+  return p;
+}
 
 export function getCreator(db, discordId) {
   return db.prepare("SELECT * FROM creators WHERE discord_id = ?").get(String(discordId)) || null;
 }
 
 export function requestLink(db, discordId, userId, now = Date.now()) {
-  userId = Number(userId);
-  if (!Number.isSafeInteger(userId) || userId <= 0) throw new Fail("bad_user");
-  const player = db.prepare("SELECT user_id, name, display_name FROM players WHERE user_id = ?").get(userId);
-  if (!player) throw new Fail("unknown_player");
+  const player = playedPlayer(db, userId);
+  userId = player.user_id;
   const cur = getCreator(db, discordId);
   if (cur && cur.link_status === "approved") throw new Fail("already_linked");
   const taken = db.prepare("SELECT discord_id FROM creators WHERE roblox_user_id = ? AND link_status = 'approved'").get(userId);
   if (taken) throw new Fail("roblox_taken");
-  const code = cur?.link_status === "pending" && cur.roblox_user_id === userId ? cur.link_code : linkCode();
   db.prepare(`
     INSERT INTO creators (discord_id, roblox_user_id, roblox_name, roblox_display, link_status, link_code, link_requested_at)
-    VALUES (?, ?, ?, ?, 'pending', ?, ?)
+    VALUES (?, ?, ?, ?, 'pending', NULL, ?)
     ON CONFLICT(discord_id) DO UPDATE SET roblox_user_id = excluded.roblox_user_id, roblox_name = excluded.roblox_name,
       roblox_display = excluded.roblox_display, link_status = 'pending', link_code = excluded.link_code,
       link_requested_at = excluded.link_requested_at, link_reviewed_by = NULL, link_reviewed_at = NULL, link_note = NULL
-  `).run(String(discordId), userId, player.name, player.display_name, code, now);
-  return { ok: true, code, roblox: { userId, name: player.name, displayName: player.display_name } };
+  `).run(String(discordId), userId, player.name, player.display_name, now);
+  return { ok: true, roblox: { userId, name: player.name, displayName: player.display_name } };
 }
 
 // ---------- Evidencias ----------
@@ -244,7 +247,7 @@ export function creatorState(db, cfg, discordId, now = Date.now()) {
   const specialMonth = [monthNow, monthPrev].find((p) => p.open && p.views >= SPECIAL.monthlyViews && !specials.some((s) => s.month === p.key));
   return {
     link: link ? {
-      status: link.link_status, code: link.link_code, note: link.link_note,
+      status: link.link_status, note: link.link_note,
       roblox: link.roblox_user_id ? { userId: link.roblox_user_id, name: link.roblox_name, displayName: link.roblox_display } : null,
     } : { status: "none" },
     week: { current: periodInfo(db, cfg, discordId, "week", w, now), previous: periodInfo(db, cfg, discordId, "week", w - 1, now) },
@@ -309,12 +312,16 @@ export function requestSpecial(db, cfg, discordId, body, now = Date.now()) {
 
 // ---------- Moderación ----------
 const withUser = (db, row, key = "discord_id") => ({ ...row, user: getDiscordUser(db, row[key]) });
+const withPlayer = (db, row) => {
+  const p = row.roblox_user_id ? db.prepare("SELECT level, first_seen, last_seen FROM players WHERE user_id = ?").get(row.roblox_user_id) : null;
+  return { ...row, player: p ? { level: p.level, firstSeen: p.first_seen, lastSeen: p.last_seen } : null };
+};
 
 export function modQueue(db, actor) {
   const q = {
     applications: db.prepare("SELECT * FROM applications WHERE status IN ('pending','contacted') ORDER BY id").all()
-      .map((a) => withUser(db, { ...a, platforms: JSON.parse(a.platforms) })),
-    links: db.prepare("SELECT * FROM creators WHERE link_status = 'pending' ORDER BY link_requested_at").all().map((c) => withUser(db, c)),
+      .map((a) => withPlayer(db, withUser(db, { ...a, platforms: JSON.parse(a.platforms) }))),
+    links: db.prepare("SELECT * FROM creators WHERE link_status = 'pending' ORDER BY link_requested_at").all().map((c) => withPlayer(db, withUser(db, c))),
     evidences: db.prepare("SELECT * FROM evidences WHERE status = 'pending' OR (status = 'approved' AND recount = 1) ORDER BY created_at").all()
       .map((e) => withUser(db, { ...e, auto_meta: e.auto_meta ? JSON.parse(e.auto_meta) : null })),
     bonuses: db.prepare(`SELECT b.*, e.url, e.title, e.platform, e.published_on FROM bonuses b JOIN evidences e ON e.id = b.evidence_id
@@ -341,10 +348,35 @@ export function reviewApplication(db, actor, body, now = Date.now()) {
   const status = { approve: "approved", reject: "rejected", contacted: "contacted" }[action];
   if (!status) throw new Fail("bad_action");
   if (a.status === "approved" || a.status === "rejected") throw new Fail("already_reviewed");
-  db.prepare("UPDATE applications SET status = ?, reviewed_by = ?, reviewed_at = ?, review_note = ? WHERE id = ?")
-    .run(status, actor.name, now, note(body), a.id);
-  audit(db, actor, `application.${action}`, nameOf(db, a.discord_id), { id: a.id, roblox: a.roblox_name, note: note(body) });
-  return { ok: true, status };
+  return tx(db, () => {
+    db.prepare("UPDATE applications SET status = ?, reviewed_by = ?, reviewed_at = ?, review_note = ? WHERE id = ?")
+      .run(status, actor.name, now, note(body), a.id);
+    // Al aprobar, el moderador también confirma que esa es su cuenta de Roblox.
+    let linked = false;
+    if (status === "approved" && a.roblox_user_id) {
+      const taken = db.prepare("SELECT 1 FROM creators WHERE roblox_user_id = ? AND link_status = 'approved' AND discord_id != ?").get(a.roblox_user_id, a.discord_id);
+      const p = db.prepare("SELECT name, display_name FROM players WHERE user_id = ?").get(a.roblox_user_id);
+      if (!taken && p) {
+        approveLink(db, actor, a.discord_id, a.roblox_user_id, p.name, p.display_name, now);
+        linked = true;
+      }
+    }
+    audit(db, actor, `application.${action}`, nameOf(db, a.discord_id), { id: a.id, roblox: `${a.roblox_name}${a.roblox_user_id ? ` (${a.roblox_user_id})` : ""}`, vinculada: linked || null, note: note(body) });
+    return { ok: true, status, linked };
+  });
+}
+
+function approveLink(db, actor, discordId, userId, name, display, now) {
+  db.prepare(`
+    INSERT INTO creators (discord_id, roblox_user_id, roblox_name, roblox_display, link_status, link_requested_at, link_reviewed_by, link_reviewed_at)
+    VALUES (?, ?, ?, ?, 'approved', ?, ?, ?)
+    ON CONFLICT(discord_id) DO UPDATE SET roblox_user_id = excluded.roblox_user_id, roblox_name = excluded.roblox_name,
+      roblox_display = excluded.roblox_display, link_status = 'approved', link_code = NULL,
+      link_reviewed_by = excluded.link_reviewed_by, link_reviewed_at = excluded.link_reviewed_at, link_note = NULL
+  `).run(String(discordId), userId, name, display, now, actor.name, now);
+  // El juego le da el nivel base "Creator" si aún no tiene ninguno.
+  db.prepare("INSERT INTO rewards (id, user_id, tier, source, day, created_at, kind, pack) VALUES (?, ?, 'creator', 'creator', ?, ?, 'tier', 'Creator')")
+    .run(randomBytes(12).toString("hex"), userId, todayStr(now), now);
 }
 
 export function reviewLink(db, actor, body, now = Date.now()) {
@@ -357,12 +389,12 @@ export function reviewLink(db, actor, body, now = Date.now()) {
     if (action === "approve") {
       const taken = db.prepare("SELECT 1 FROM creators WHERE roblox_user_id = ? AND link_status = 'approved' AND discord_id != ?").get(c.roblox_user_id, c.discord_id);
       if (taken) throw new Fail("roblox_taken");
-      // El juego le da el nivel base "Creator" si aún no tiene ninguno.
-      db.prepare("INSERT INTO rewards (id, user_id, tier, source, day, created_at, kind, pack) VALUES (?, ?, 'creator', 'creator', ?, ?, 'tier', 'Creator')")
-        .run(randomBytes(12).toString("hex"), c.roblox_user_id, todayStr(now), now);
+      approveLink(db, actor, c.discord_id, c.roblox_user_id, c.roblox_name, c.roblox_display, now);
+      db.prepare("UPDATE creators SET link_note = ? WHERE discord_id = ?").run(note(body), c.discord_id);
+    } else {
+      db.prepare("UPDATE creators SET link_status = 'rejected', link_reviewed_by = ?, link_reviewed_at = ?, link_note = ? WHERE discord_id = ?")
+        .run(actor.name, now, note(body), c.discord_id);
     }
-    db.prepare("UPDATE creators SET link_status = ?, link_reviewed_by = ?, link_reviewed_at = ?, link_note = ? WHERE discord_id = ?")
-      .run(action === "approve" ? "approved" : "rejected", actor.name, now, note(body), c.discord_id);
     audit(db, actor, `link.${action}`, nameOf(db, c.discord_id), { roblox: `${c.roblox_name} (${c.roblox_user_id})`, note: note(body) });
     return { ok: true };
   });

@@ -49,10 +49,10 @@ Todo lo del juego llega al **buzón del Lobby**. Si el creador no está conectad
 ## Para creadores
 
 1. **Únete al Discord de Sky Eggs** y entra al panel con esa cuenta.
-2. **Aplica** (pestaña Aplicar): tu usuario de Roblox, tus redes con enlaces y seguidores, y qué contenido harías. Tienes que tener 13 años o más.
-3. **Espera el mensaje de un moderador** por Discord. Te explica el programa y te da el rol de Content Creator en Discord y el nivel Creator en el juego.
-4. **Sal y vuelve a entrar** al panel para que lea tu rol nuevo.
-5. **Vincula tu Roblox** (pestaña Mi Roblox): busca tu cuenta, copia el código `SKY-XXXXXX` y ponlo en la descripción de tu perfil de Roblox. Avisa a un moderador. Cuando lo apruebe, ya puedes quitarlo.
+2. **Juega Sky Eggs al menos una vez** con tu cuenta de Roblox (si no, no aparece en la lista).
+3. **Aplica** (pestaña Aplicar): busca y elige tu cuenta de Roblox de la lista, tus redes con enlaces y seguidores, y qué contenido harías. Tienes que tener 13 años o más.
+4. **Espera el mensaje de un moderador** por Discord. Te explica el programa y te da el rol de Content Creator en Discord y el nivel Creator en el juego.
+5. **Sal y vuelve a entrar** al panel para que lea tu rol nuevo. Tu cuenta de Roblox ya queda vinculada (el moderador la confirmó al aprobarte). Para cambiarla, elige la nueva en **Mi Roblox** y un moderador la confirma.
 6. **Graba y publica** un video o directo de Sky Eggs.
 7. **Sube la evidencia** (pestaña Evidencias): enlace, fecha de publicación y, si puedes, una captura de las estadísticas. Cada enlace se sube una sola vez y tiene que ser de los últimos 45 días.
 8. **Espera la revisión**. En YouTube, TikTok, Twitch y Kick las vistas se leen y se actualizan solas (cada 6 h) mientras el video cuente para un reclamo. En Instagram, Facebook y otras, el moderador escribe las vistas; si siguen subiendo, toca **Pedir recuento**.
@@ -71,11 +71,10 @@ Reglas: contenido de Sky Eggs, vistas reales (nada de bots), comandos con respet
    - Abre las redes del aspirante desde la tarjeta.
    - Escríbele por Discord (su usuario sale en la tarjeta) y marca **Contactado**.
    - Decide: **Aprobar** o **Rechazar** con una nota (en el rechazo es obligatoria).
-   - Si apruebas: dale el rol **Content Creator** en Discord, en el juego `;SetCreator <usuario> Creator` y pásale esta guía. Dile que salga y vuelva a entrar al panel.
-3. **Vinculaciones**
-   - Abre el perfil de Roblox desde la tarjeta.
-   - Comprueba que el código `SKY-…` de la tarjeta esté en la descripción del perfil.
-   - **Aprobar** (o Rechazar con el motivo). El juego le pone el nivel Creator solo cuando se conecte, si no lo tenía.
+   - **Aprobar también confirma su cuenta de Roblox.** La tarjeta muestra la cuenta que eligió (enlace al perfil, desde cuándo juega, su nivel y la última vez que entró). Si dudas, pregúntale por Discord o búscalo en el juego.
+   - Si apruebas: dale el rol **Content Creator** en Discord y pásale esta guía. El nivel Creator del juego le llega solo la próxima vez que entre. Dile que salga y vuelva a entrar al panel.
+3. **Vinculaciones** (cuando un creador cambia de cuenta)
+   - Confirma con él que la cuenta nueva es suya y **Aprobar** (o Rechazar con el motivo).
 4. **Evidencias**
    - Abre el enlace: tiene que ser de Sky Eggs, del canal de ese creador (la tarjeta muestra el canal y la fecha que leyó la página) y con la fecha correcta.
    - Si la página leyó las vistas: **Aprobar con vistas automáticas**. Se actualizan solas cada 6 h hasta que termina el plazo de reclamo de ese video.
