@@ -87,6 +87,15 @@ export async function searchPlayers(db, rawQuery, opts) {
     ORDER BY rank, last_seen DESC LIMIT 6
   `).all({ q: qlc, p: qlc.replace(/[\\%_]/g, "\\$&") + "%" });
 
+  // Solo jugadores de Sky Eggs (vinculación de creadores): no se consulta Roblox.
+  if (opts.onlyPlayed) {
+    const pics = await avatars(local.map((u) => u.userId), opts);
+    return {
+      query: q,
+      players: local.map((u) => ({ userId: u.userId, name: u.name, displayName: u.displayName, played: true, exact: u.rank <= 1, avatar: pics.get(u.userId) || null })),
+    };
+  }
+
   // 2) Roblox (usuario exacto y búsqueda que también mira el nombre visible).
   const remote = await robloxLookup(q, opts);
   const upsert = db.prepare(`

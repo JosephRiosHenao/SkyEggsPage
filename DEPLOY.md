@@ -191,7 +191,7 @@ Prueba: abre `https://skyeggs.pro/creadores/panel/`, entra con Discord y comprue
 ### Cómo funciona
 
 - **Aspirante** (sin rol): llena la solicitud. **Moderador**: la revisa, contacta, aprueba o rechaza. Al aprobar, el moderador le da el rol de Content Creator en Discord y `;SetCreator <usuario> Creator` en el juego.
-- **Creador**: vincula su Roblox (código `SKY-…` en la descripción del perfil; lo aprueba un moderador), sube evidencias (enlace + captura opcional), ve sus metas y reclama **1 pack por semana** (hasta 3 días después del domingo) y **1 por mes** (hasta 5 días después). El juego entrega el pack al buzón con `CreatorService.SendReward` (mismo id `cr-<periodo>-<userId>`: no se duplica con `;CreatorReward`).
+- **Creador**: su cuenta de Roblox se elige de la lista de jugadores que ya entraron a Sky Eggs (si no aparece, tiene que jugar primero) y el moderador la confirma al aprobar la solicitud, sube evidencias (enlace + captura opcional), ve sus metas y reclama **1 pack por semana** (hasta 3 días después del domingo) y **1 por mes** (hasta 5 días después). El juego entrega el pack al buzón con `CreatorService.SendReward` (mismo id `cr-<periodo>-<userId>`: no se duplica con `;CreatorReward`).
 - **Bono de Robux** (≥ 10.000 vistas, 100 R$ por cada 10.000, máx. 1.000 por video): moderador → admin (persona distinta) → el admin paga por el grupo y marca "Pagado".
 - **Pedido especial** (≥ 100.000 vistas aprobadas en el mes): solo el admin lo resuelve.
 - Cada acción de staff queda en `audit` con nombre, rol, hora y detalles (pestaña Registro).

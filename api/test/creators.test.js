@@ -55,15 +55,27 @@ test("flujo completo: solicitud → vínculo → evidencia → reclamo semanal �
   seedRoblox(db, c);
 
   // Solicitud
-  assert.throws(() => C.submitApplication(db, "nuevo", { robloxName: "x" }), /age_required/);
-  const app = C.submitApplication(db, "nuevo", { age13: true, robloxName: "Nuevo_YT", platforms: [{ type: "YouTube", url: "https://youtube.com/@nuevo", followers: 1200 }], about: "Hago videos de Roblox cada semana." }, now);
+  assert.throws(() => C.submitApplication(db, "nuevo", { robloxUserId: 500 }), /age_required/);
+  const base = { age13: true, platforms: [{ type: "YouTube", url: "https://youtube.com/@nuevo", followers: 1200 }], about: "Hago videos de Roblox cada semana." };
+  // cuenta que nunca jugó Sky Eggs (solo salió en la búsqueda de Roblox): no puede aplicar
+  db.prepare("INSERT INTO players (user_id, name, display_name, name_lc, display_lc, played, first_seen, last_seen) VALUES (900, 'NoJuega', 'NoJuega', 'nojuega', 'nojuega', 0, 0, 0)").run();
+  assert.throws(() => C.submitApplication(db, "nuevo", { ...base, robloxUserId: 900 }), /must_play/);
+  assert.throws(() => C.submitApplication(db, "nuevo", { ...base }), /pick_account/);
+  seedRoblox(db, c, 501, "Nuevo_YT");
+  const app = C.submitApplication(db, "nuevo", { ...base, robloxUserId: 501 }, now);
   assert.throws(() => C.submitApplication(db, "nuevo", { age13: true }), /already_pending/);
   assert.equal(C.reviewApplication(db, actor("mod"), { id: app.id, action: "contacted", note: "Le escribí por DM" }).status, "contacted");
-  assert.equal(C.reviewApplication(db, actor("mod"), { id: app.id, action: "approve" }).status, "approved");
+  const ok = C.reviewApplication(db, actor("mod"), { id: app.id, action: "approve" });
+  assert.equal(ok.status, "approved");
+  assert.equal(ok.linked, true); // aprobar la solicitud confirma su cuenta de Roblox
+  assert.equal(C.getCreator(db, "nuevo").link_status, "approved");
+  assert.equal(C.getCreator(db, "nuevo").roblox_user_id, 501);
 
   // Vinculación (un moderador la aprueba; no puede aprobarse a sí mismo)
+  assert.throws(() => C.requestLink(db, "cre", 900, now), /must_play/);
   const link = C.requestLink(db, "cre", 500, now);
-  assert.match(link.code, /^SKY-[2-9A-HJKMNP-Z]{6}$/);
+  assert.equal(link.roblox.name, "CreadorPro");
+  assert.equal(C.modQueue(db, actor("mod")).links[0].player.level, 30);
   assert.throws(() => C.claimPack(db, c, "cre", { period: "week" }, now), /link_required/);
   assert.throws(() => C.reviewLink(db, actor("cre"), { discordId: "cre", action: "approve" }), /own_item/);
   C.reviewLink(db, actor("mod"), { discordId: "cre", action: "approve" }, now);
@@ -201,7 +213,11 @@ test("HTTP: login con Discord lee los roles y protege cada zona", async () => {
     assert.equal(me.user.roles.creator, false);
     assert.equal((await fetch(`${base}/api/creators/me`, { headers: { cookie: fan } })).status, 403);
     assert.equal((await fetch(`${base}/api/mod/queue`, { headers: { cookie: fan } })).status, 403);
-    const apply = await fetch(`${base}/api/creators/apply`, json({ age13: true, robloxName: "FanYT", platforms: [{ type: "TikTok", url: "https://tiktok.com/@fan" }], about: "Quiero grabar Sky Eggs todos los días." }, fan));
+    gamePull(db, c, { players: [{ userId: 700, name: "FanYT", displayName: "Fan", level: 15 }] });
+    const found = await (await fetch(`${base}/api/players/search?q=fany&played=1`)).json();
+    assert.equal(found.players.length, 1);
+    assert.equal((await (await fetch(`${base}/api/players/search?q=nadie&played=1`)).json()).players.length, 0);
+    const apply = await fetch(`${base}/api/creators/apply`, json({ age13: true, robloxUserId: 700, platforms: [{ type: "TikTok", url: "https://tiktok.com/@fan" }], about: "Quiero grabar Sky Eggs todos los días." }, fan));
     assert.equal(apply.status, 200);
 
     const mod = await login(base, "mod");
