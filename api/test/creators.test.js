@@ -19,6 +19,7 @@ const cfg = () => ({
   siteUrl: "https://skyeggs.pro", uploadsDir: mkdtempSync(join(tmpdir(), "se-up-")),
   discord: { clientId: "cid", clientSecret: "sec", guildId: "g1", redirectUri: "https://skyeggs.pro/api/auth/discord/callback", webhookUrl: "", roles: ROLE },
   creators: { claimGraceDaysWeek: 3, claimGraceDaysMonth: 5 },
+  views: { enabled: true, ytdlpPath: "/no/existe", pipPath: "", youtubeApiKey: "", refreshHours: 6, maxFails: 3, timeoutMs: 2000 },
 });
 const silent = { info() {}, warn() {}, error() {} };
 const actor = (id, role = "moderator") => ({ id, name: `@${id}`, role });
@@ -164,9 +165,9 @@ function fakeDiscord(rolesById) {
   };
 }
 
-async function withServer(fn, fetchImpl) {
+async function withServer(fn, fetchImpl, probe = async () => ({ ok: false, error: "sin red en pruebas" })) {
   const db = openDb(":memory:"); const c = cfg();
-  const srv = createServer(createApp({ db, cfg: c, log: silent, fetchImpl }));
+  const srv = createServer(createApp({ db, cfg: c, log: silent, fetchImpl, probe }));
   await new Promise((r) => srv.listen(0, r));
   const base = `http://127.0.0.1:${srv.address().port}`;
   try { await fn(base, db, c); } finally { srv.close(); }
@@ -249,4 +250,74 @@ test("HTTP: sin Discord configurado el login avisa y no rompe", async () => {
   assert.match(r.headers.get("location"), /error=discord_off/);
   assert.equal((await (await fetch(`${base}/api/me`)).json()).discord, false);
   srv.close();
+});
+
+
+// ---------- Vistas automáticas ----------
+import { trackableSite, probeViews } from "../src/views.js";
+import { probeEvidence } from "../src/app.js";
+
+test("solo se leen redes conocidas por https (nada de URLs internas)", () => {
+  assert.equal(trackableSite("https://www.youtube.com/watch?v=abc"), "youtube");
+  assert.equal(trackableSite("https://youtu.be/abc"), "youtube");
+  assert.equal(trackableSite("https://www.tiktok.com/@a/video/1"), "tiktok");
+  assert.equal(trackableSite("https://vm.tiktok.com/ZM123/"), "tiktok");
+  assert.equal(trackableSite("https://www.twitch.tv/videos/1"), "twitch");
+  assert.equal(trackableSite("https://kick.com/x/videos/1"), "kick");
+  assert.equal(trackableSite("https://www.instagram.com/reel/1"), null);
+  assert.equal(trackableSite("http://youtube.com/watch?v=1"), null);
+  assert.equal(trackableSite("https://youtube.com.evil.com/x"), null);
+  assert.equal(trackableSite("https://169.254.169.254/latest"), null);
+  assert.equal(trackableSite("https://youtube.com:8443/x"), null);
+});
+
+test("sin yt-dlp instalado, la lectura falla con un motivo claro", async () => {
+  const r = await probeViews(cfg(), "https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+  assert.equal(r.ok, false);
+  assert.match(r.error, /yt-dlp/);
+  const ig = await probeViews(cfg(), "https://www.instagram.com/reel/1");
+  assert.match(ig.error, /no permite/);
+});
+
+test("vistas automáticas: se aprueban, se refrescan y actualizan el bono; si fallan pasan a fijas", async () => {
+  const db = openDb(":memory:"); const c = cfg();
+  const now = Date.parse("2026-11-20T12:00:00-05:00");
+  seedUser(db, "cre", { creator: true });
+  C.setGrace(c);
+  const e = C.addEvidence(db, "cre", { url: "https://www.youtube.com/watch?v=abc123", publishedOn: "2026-11-18" }, now);
+  assert.equal(e.track, "auto");
+  const ig = C.addEvidence(db, "cre", { url: "https://www.instagram.com/reel/9", publishedOn: "2026-11-18" }, now);
+  assert.equal(ig.track, "manual");
+  // hasta cuándo: plazo del mes (30 nov + 5 días) porque termina después que el de la semana
+  assert.equal(db.prepare("SELECT track_until FROM evidences WHERE id = ?").get(e.id).track_until, Date.parse("2026-12-06T00:00:00-05:00"));
+
+  let views = 12_000;
+  const probe = async () => ({ ok: true, views, meta: { site: "youtube", channel: "Lu Plays", uploadDate: "2026-11-18" } });
+  await probeEvidence(db, c, e.id, "x", probe, silent, now);
+  assert.throws(() => C.reviewEvidence(db, actor("mod"), { id: ig.id, action: "approve", mode: "auto" }), /not_trackable|no_auto_views/);
+  C.reviewEvidence(db, actor("mod"), { id: e.id, action: "approve", mode: "auto" }, now);
+  assert.equal(C.creatorState(db, c, "cre", now).week.current.views, 12_000);
+  C.requestBonus(db, "cre", e.id);
+
+  // pasa el tiempo: toca refrescar
+  assert.equal(C.dueForProbe(db, c, now + 60_000).length, 0);
+  assert.equal(C.dueForProbe(db, c, now + 7 * 3_600_000).length, 1);
+  views = 34_500;
+  await probeEvidence(db, c, e.id, "x", probe, silent, now);
+  assert.equal(C.creatorState(db, c, "cre", now).week.current.views, 34_500);
+  assert.equal(db.prepare("SELECT robux FROM bonuses").get().robux, 300);
+  // fuera del plazo ya no se refresca
+  assert.equal(C.dueForProbe(db, c, Date.parse("2026-12-07T00:00:00-05:00")).length, 0);
+
+  // 3 fallos seguidos → vistas fijas y vuelve a la cola del moderador
+  const bad = async () => ({ ok: false, error: "Sign in to confirm you're not a bot" });
+  for (let i = 0; i < 3; i++) await probeEvidence(db, c, e.id, "x", bad, silent, now);
+  const row = db.prepare("SELECT track, recount, views, auto_error FROM evidences WHERE id = ?").get(e.id);
+  assert.equal(row.track, "manual"); assert.equal(row.recount, 1); assert.equal(row.views, 34_500);
+  assert.match(row.auto_error, /bot/);
+  assert.equal(C.modQueue(db, actor("mod")).evidences.some((x) => x.id === e.id), true);
+  // el moderador fija las vistas
+  C.reviewEvidence(db, actor("mod"), { id: e.id, action: "update", views: 35_000 }, now);
+  assert.equal(db.prepare("SELECT track FROM evidences WHERE id = ?").get(e.id).track, "manual");
+  assert.equal(C.dueForProbe(db, c, now + 30 * 86400_000).length, 0);
 });

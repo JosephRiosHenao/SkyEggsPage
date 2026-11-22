@@ -1,8 +1,18 @@
-# API de Prueba tu suerte (Node sin dependencias + SQLite integrado)
+# API de Prueba tu suerte y del Programa de Creadores
+# Node sin dependencias + SQLite integrado + yt-dlp (lectura de vistas sin claves).
 FROM node:22-alpine
 
-ENV NODE_ENV=production PORT=8080 DB_PATH=/data/skyeggs.db
+ENV NODE_ENV=production PORT=8080 DB_PATH=/data/skyeggs.db \
+    YTDLP_PATH=/opt/ytdlp/bin/yt-dlp YTDLP_PIP=/opt/ytdlp/bin/pip
 WORKDIR /app
+
+# yt-dlp en un entorno propio, del usuario node, para que la API lo actualice sola cada día.
+RUN apk add --no-cache python3 \
+ && python3 -m venv /opt/ytdlp \
+ && /opt/ytdlp/bin/pip install --no-cache-dir -q yt-dlp \
+ && /opt/ytdlp/bin/yt-dlp --version \
+ && chown -R node:node /opt/ytdlp
+
 COPY package.json ./
 COPY src ./src
 

@@ -197,6 +197,7 @@ Prueba: abre `https://skyeggs.pro/creadores/panel/`, entra con Discord y comprue
 - Cada acción de staff queda en `audit` con nombre, rol, hora y detalles (pestaña Registro).
 - Las capturas se guardan en el volumen (`/data/uploads`) y solo las ven su dueño y el staff.
 - Packs y niveles: `api/src/program.js`. Deben coincidir con `CreatorServiceConfig.Packs` del juego.
+- **Vistas automáticas** (`api/src/views.js`): la imagen trae **yt-dlp** (en `/opt/ytdlp`, se actualiza solo cada día). Lee YouTube, TikTok, Twitch y Kick sin claves y refresca cada `VIEWS_REFRESH_HOURS` (6) mientras el video cuente para un reclamo. Solo se consultan esos dominios por https (sin extractor genérico). Si YouTube bloquea la IP del VPS, `YOUTUBE_API_KEY` (gratis) sirve de respaldo. `VIEWS_AUTO=false` lo apaga. Para ver qué pasa: `docker logs skyeggs-api | grep views`.
 
 ## Problemas comunes
 

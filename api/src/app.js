@@ -8,6 +8,7 @@ import { safeEqual, verifyPassword, createSession, checkSession, getSession, del
 import { discordEnabled, authorizeUrl, fetchDiscordIdentity, rolesFrom, notifyMods } from "./discord.js";
 import { publicProgram } from "./program.js";
 import * as C from "./creators.js";
+import { probeViews, updateYtDlp } from "./views.js";
 
 // Límite simple por clave (ventana deslizante en memoria).
 export class Limiter {
@@ -24,7 +25,38 @@ export class Limiter {
 
 class HttpError extends Error { constructor(status, code) { super(code); this.status = status; this.code = code; } }
 
-export function createApp({ db, cfg, fetchImpl = fetch, log = console }) {
+// Lee las vistas de una evidencia y guarda el resultado (no lanza).
+export async function probeEvidence(db, cfg, id, url, probe, log = console, now = Date.now()) {
+  let r;
+  try { r = await probe(cfg, url); } catch (e) { r = { ok: false, error: e.message }; }
+  const out = C.applyProbe(db, cfg, id, r, now);
+  if (!r.ok) log.warn(`[views] evidencia ${id}: ${r.error}`);
+  return out;
+}
+
+// Refresca, uno por uno y sin prisa, las evidencias automáticas que toca revisar.
+export function startViewsTracker({ db, cfg, probe = probeViews, log = console }) {
+  if (!cfg.views.enabled) return () => {};
+  let running = false;
+  let lastUpdate = 0;
+  const tick = async () => {
+    if (running) return;
+    running = true;
+    try {
+      if (Date.now() - lastUpdate > 24 * 3_600_000) { lastUpdate = Date.now(); updateYtDlp(cfg, log); }
+      for (const ev of C.dueForProbe(db, cfg)) {
+        await probeEvidence(db, cfg, ev.id, ev.url, probe, log);
+        await new Promise((r) => setTimeout(r, 4000));
+      }
+    } catch (e) { log.error("[views]", e); } finally { running = false; }
+  };
+  const timer = setInterval(tick, 15 * 60_000);
+  setTimeout(tick, 30_000);
+  return () => clearInterval(timer);
+}
+
+export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (c, u) => probeViews(c, u, fetchImpl) }) {
+  C.setGrace(cfg);
   const limits = {
     roll: new Limiter(cfg.rollsPerMinute, 60_000),
     search: new Limiter(20, 60_000),
@@ -315,6 +347,8 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console }) {
       const body = await readJson(req, 4096);
       const out = run(() => C.addEvidence(db, u.id, body));
       notifyMods(cfg, `📹 Nueva evidencia de @${u.username} para revisar en ${cfg.siteUrl}/creadores/panel/#moderacion`, fetchImpl);
+      // Primera lectura de vistas en segundo plano (el moderador ya la ve al revisar).
+      if (out.track === "auto" && cfg.views.enabled) probeEvidence(db, cfg, out.id, body.url, probe, log);
       return out;
     },
     "POST /api/creators/recount": async (req) => {
@@ -356,6 +390,16 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console }) {
     "POST /api/mod/application": async (req) => { checkOrigin(req); const a = staffActor(req); const b = await readJson(req, 2048); return run(() => C.reviewApplication(db, a, b)); },
     "POST /api/mod/link": async (req) => { checkOrigin(req); const a = staffActor(req); const b = await readJson(req, 2048); return run(() => C.reviewLink(db, a, b)); },
     "POST /api/mod/evidence": async (req) => { checkOrigin(req); const a = staffActor(req); const b = await readJson(req, 2048); return run(() => C.reviewEvidence(db, a, b)); },
+    "POST /api/mod/evidence/probe": async (req) => {
+      checkOrigin(req); const a = staffActor(req);
+      const b = await readJson(req, 256);
+      const ev = db.prepare("SELECT id, url, status, track FROM evidences WHERE id = ?").get(Number(b.id));
+      if (!ev) throw new HttpError(404, "not_found");
+      if (!cfg.views.enabled) throw new HttpError(400, "views_off");
+      const out = await probeEvidence(db, cfg, ev.id, ev.url, probe, log);
+      C.audit(db, a, "evidence.probe", null, { id: ev.id, ok: out?.ok, views: out?.views ?? null, error: out?.error ?? null });
+      return out;
+    },
     "POST /api/mod/bonus": async (req) => { checkOrigin(req); const a = staffActor(req); const b = await readJson(req, 2048); return run(() => C.reviewBonus(db, a, b)); },
     "POST /api/mod/special": async (req) => { checkOrigin(req); const a = staffActor(req, true); const b = await readJson(req, 2048); return run(() => C.reviewSpecial(db, a, b)); },
   };

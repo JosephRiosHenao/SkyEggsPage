@@ -43,6 +43,16 @@ export const config = {
       creator: process.env.DISCORD_ROLE_CREATOR || "1561051688125730897",
     },
   },
+  // Lectura automática de vistas (yt-dlp). Respaldo opcional para YouTube: YOUTUBE_API_KEY.
+  views: {
+    enabled: process.env.VIEWS_AUTO !== "false",
+    ytdlpPath: process.env.YTDLP_PATH || "/opt/ytdlp/bin/yt-dlp",
+    pipPath: process.env.YTDLP_PIP || "/opt/ytdlp/bin/pip",
+    youtubeApiKey: process.env.YOUTUBE_API_KEY || "",
+    refreshHours: int("VIEWS_REFRESH_HOURS", 6),
+    maxFails: int("VIEWS_MAX_FAILS", 4),
+    timeoutMs: int("VIEWS_TIMEOUT_MS", 45_000),
+  },
   creators: {
     // Días después de cerrar la semana / el mes para reclamar su pack.
     claimGraceDaysWeek: int("CLAIM_GRACE_DAYS_WEEK", 3),

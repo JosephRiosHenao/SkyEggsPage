@@ -48,6 +48,9 @@
     needs_other_reviewer: "La aprobación final tiene que hacerla una persona distinta a la que aprobó primero.",
     bad_action: "Esa acción no se puede hacer en este estado.",
     not_found: "No se encontró. Actualiza la página.",
+    not_trackable: "Esta red no deja leer las vistas solas. Escribe las vistas fijas.",
+    no_auto_views: "Todavía no se pudieron leer las vistas. Toca “Volver a leer” o escribe las vistas fijas.",
+    views_off: "La lectura automática de vistas está apagada en el servidor.",
   };
   const LOGIN_ERRORS = {
     discord_off: "El login con Discord todavía no está configurado. Avísale al admin.",
@@ -71,6 +74,21 @@
   };
   const link = (href, text) => el("a", { href, target: "_blank", rel: "noopener noreferrer nofollow" }, text);
   const pill = (status, text) => el("span", { class: `pill pill--${status}` }, text);
+  const ago = (t) => {
+    if (!t) return "nunca";
+    const m = Math.round((Date.now() - t) / 60_000);
+    return m < 60 ? `hace ${Math.max(1, m)} min` : m < 1440 ? `hace ${Math.round(m / 60)} h` : `hace ${Math.round(m / 1440)} días`;
+  };
+  // Estado de la lectura automática de vistas de una evidencia.
+  function trackLine(e) {
+    const track = e.track, autoViews = e.autoViews ?? e.auto_views, checked = e.autoCheckedAt ?? e.auto_checked_at;
+    const err = e.autoError ?? e.auto_error, until = e.trackUntil ?? e.track_until;
+    if (track === "auto") {
+      if (autoViews != null) return `🔄 Vistas automáticas: ${n(autoViews)} (leídas ${ago(checked)}). Se actualizan solas hasta el ${new Date(until).toLocaleDateString("es-CO", { day: "numeric", month: "long" })}.`;
+      return err ? `🔄 Aún no se pudieron leer las vistas (${err}). Se vuelve a intentar.` : "🔄 Leyendo las vistas…";
+    }
+    return err ? `📌 Vistas fijas: no se pudieron leer solas (${err}).` : "📌 Vistas fijas: las escribe un moderador.";
+  }
 
   async function api(path, body, raw) {
     const init = body === undefined ? {} : raw
@@ -294,7 +312,8 @@
       for (const ev of creator.evidences) {
         const actions = el("div", { class: "item__actions" });
         if (ev.status === "approved") {
-          if (!ev.recount) actions.append(el("button", { class: "btn btn--mini btn--white", type: "button", onclick: (e) => act(e.currentTarget, () => api("/api/creators/recount", { id: ev.id }), "Recuento pedido.", () => show("evidencias")) }, "Pedir recuento"));
+          if (ev.track === "auto") { /* se cuentan solas */ }
+          else if (!ev.recount) actions.append(el("button", { class: "btn btn--mini btn--white", type: "button", onclick: (e) => act(e.currentTarget, () => api("/api/creators/recount", { id: ev.id }), "Recuento pedido.", () => show("evidencias")) }, "Pedir recuento"));
           else actions.append(el("span", { class: "small muted" }, "Recuento pedido"));
           if (ev.bonus) actions.append(pill(ev.bonus.status, `Bono ${n(ev.bonus.robux)} R$: ${BONUS_LABEL[ev.bonus.status]}`));
           else if (ev.robuxEligible) actions.append(el("button", { class: "btn btn--mini btn--green", type: "button", onclick: (e) => act(e.currentTarget, () => api("/api/creators/bonus", { evidenceId: ev.id }), (o) => `Bono de ${n(o.robux)} Robux pedido.`, () => show("evidencias")) }, `Pedir bono de ${n(ev.robuxEligible)} R$`));
@@ -302,11 +321,15 @@
         list.append(el("article", { class: "item" },
           el("div", { class: "item__head" }, el("span", { class: "item__title" }, `${ev.kind === "live" ? "🔴" : "🎬"} ${ev.title || ev.platform}`), pill(ev.status, label[ev.status])),
           el("p", { class: "item__meta" }, `${ev.platform} · publicado ${ev.publishedOn}${ev.status === "approved" ? ` · ${n(ev.views)} vistas` : ""} · `, link(ev.url, "abrir")),
+          ev.status !== "rejected" ? el("p", { class: "item__meta" }, trackLine(ev)) : null,
           ev.reviewNote ? el("p", { class: "item__meta" }, `Nota: ${ev.reviewNote}`) : null,
           actions.childNodes.length ? actions : null));
       }
       s.replaceChildren(
-        el("div", { class: "box" }, el("h2", {}, "Subir video o directo"), el("p", { class: "muted" }, "Tiene que ser de Sky Eggs y de tu canal. Un moderador abre el enlace y anota las vistas."), form),
+        el("div", { class: "box" }, el("h2", {}, "Subir video o directo"),
+          el("p", { class: "muted" }, "Tiene que ser de Sky Eggs y de tu canal. Un moderador lo revisa y lo aprueba."),
+          el("p", { class: "small muted" }, "YouTube, TikTok, Twitch y Kick: las vistas se leen y se actualizan solas mientras el video cuente para un reclamo. Instagram, Facebook y otras: un moderador escribe las vistas (puedes pedir recuento)."),
+          form),
         el("div", { class: "box" }, el("h2", {}, "Mis evidencias"), creator.evidences.length ? list : el("p", { class: "empty" }, "Aún no has subido nada.")));
     },
 
@@ -462,18 +485,29 @@
 
   function modEvidences(body) {
     const items = queue.evidences.map((e) => {
-      const views = el("input", { type: "number", min: "0", placeholder: "Vistas", value: e.status === "approved" ? String(e.views) : "" });
+      const views = el("input", { type: "number", min: "0", placeholder: "Vistas fijas", value: e.status === "approved" ? String(e.views) : "" });
       const note = noteInput();
       const recount = e.status === "approved";
+      const meta = e.auto_meta || {};
+      const canAuto = e.auto_views != null;
+      const action = recount ? "update" : "approve";
+      const dateWarn = meta.uploadDate && meta.uploadDate !== e.published_on ? ` ⚠️ el creador puso ${e.published_on}` : "";
       return el("article", { class: "item" },
-        el("div", { class: "item__head" }, el("span", { class: "item__title" }, `${e.kind === "live" ? "🔴 Directo" : "🎬 Video"} · ${userLine(e.user)}`), pill(recount ? "pending_mod" : "pending", recount ? `Recuento (antes ${n(e.views)})` : "Nueva")),
+        el("div", { class: "item__head" }, el("span", { class: "item__title" }, `${e.kind === "live" ? "🔴 Directo" : "🎬 Video"} · ${userLine(e.user)}`), pill(recount ? "pending_mod" : "pending", recount ? `Revisar vistas (ahora ${n(e.views)})` : "Nueva")),
         el("p", { class: "item__meta" }, `${e.platform} · publicado ${e.published_on}${e.title ? ` · ${e.title}` : ""} · `, link(e.url, "abrir enlace")),
+        canAuto ? el("p", { class: "item__meta" }, `🔎 Leído de la plataforma: ${n(e.auto_views)} vistas`, meta.channel ? ` · canal “${meta.channel}”` : "", meta.uploadDate ? ` · publicado ${meta.uploadDate}${dateWarn}` : "", ` · ${ago(e.auto_checked_at)}`) : null,
+        el("p", { class: "item__meta" }, trackLine(e)),
         e.note ? el("p", { class: "item__meta" }, `Nota del creador: ${e.note}`) : null,
         e.file ? el("a", { href: `/api/files/${e.file}`, target: "_blank", rel: "noopener" }, el("img", { class: "proof", src: `/api/files/${e.file}`, alt: "Captura de estadísticas" })) : null,
+        el("div", { class: "item__actions" },
+          canAuto ? btn(recount ? "Usar automáticas" : "Aprobar con vistas automáticas", "btn--green", (b) =>
+            act(b, () => api("/api/mod/evidence", { id: e.id, action, mode: "auto", note: note.value }), "Aprobada: las vistas se actualizan solas.", refreshMod)) : null,
+          e.platform !== "Instagram" && e.platform !== "Facebook" ? btn("Volver a leer", "btn--white", (b) =>
+            act(b, () => api("/api/mod/evidence/probe", { id: e.id }), (o) => (o.ok ? `Leídas: ${n(o.views)} vistas.` : `No se pudieron leer: ${o.error}`), refreshMod)) : null),
         el("div", { class: "item__actions" }, views, note,
-          btn(recount ? "Actualizar" : "Aprobar", "btn--green", (b) => {
+          btn(recount ? "Fijar vistas" : "Aprobar con vistas fijas", canAuto ? "btn--white" : "btn--green", (b) => {
             if (views.value === "") return flash("Escribe las vistas que tiene ahora.", "bad");
-            act(b, () => api("/api/mod/evidence", { id: e.id, action: recount ? "update" : "approve", views: Number(views.value), note: note.value }), recount ? "Vistas actualizadas." : "Evidencia aprobada.", refreshMod);
+            act(b, () => api("/api/mod/evidence", { id: e.id, action, mode: "fixed", views: Number(views.value), note: note.value }), recount ? "Vistas fijadas." : "Evidencia aprobada con vistas fijas.", refreshMod);
           }),
           recount ? null : btn("Rechazar", "btn--red", (b) => { if (!note.value.trim()) return flash("Escribe el motivo en la nota.", "bad"); act(b, () => api("/api/mod/evidence", { id: e.id, action: "reject", note: note.value }), "Evidencia rechazada.", refreshMod); })));
     });
@@ -528,7 +562,7 @@
   const ACTION_TEXT = {
     "application.approve": "aprobó la solicitud de", "application.reject": "rechazó la solicitud de", "application.contacted": "contactó a",
     "link.approve": "aprobó la vinculación de", "link.reject": "rechazó la vinculación de",
-    "evidence.approve": "aprobó una evidencia de", "evidence.reject": "rechazó una evidencia de", "evidence.update": "actualizó las vistas de",
+    "evidence.approve": "aprobó una evidencia de", "evidence.probe": "volvió a leer las vistas de una evidencia", "evidence.reject": "rechazó una evidencia de", "evidence.update": "actualizó las vistas de",
     "bonus.approve": "aprobó un bono de", "bonus.reject": "rechazó un bono de", "bonus.paid": "pagó el bono de",
     "special.approve": "aprobó el pedido de", "special.reject": "rechazó el pedido de", "special.done": "cumplió el pedido de",
     claim: "reclamó un pack para", "codes.create": "generó códigos", "gift.send": "envió un regalo a", upload: "subió una captura",

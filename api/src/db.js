@@ -90,6 +90,7 @@ export function openDb(path) {
   }
 
   // ---------- Programa de creadores ----------
+  const evCols = () => { try { return cols("evidences"); } catch { return []; } };
   db.exec(`
     CREATE TABLE IF NOT EXISTS discord_users (
       id TEXT PRIMARY KEY,
@@ -198,6 +199,11 @@ export function openDb(path) {
     );
     CREATE INDEX IF NOT EXISTS audit_ts ON audit(ts);
   `);
+  // Vistas automáticas: track 'auto' (se refresca sola) o 'manual' (vistas fijas del moderador).
+  for (const [c, def] of [
+    ["track", "TEXT NOT NULL DEFAULT 'manual'"], ["auto_views", "INTEGER"], ["auto_checked_at", "INTEGER"],
+    ["auto_error", "TEXT"], ["auto_fails", "INTEGER NOT NULL DEFAULT 0"], ["auto_meta", "TEXT"], ["track_until", "INTEGER"],
+  ]) if (!evCols().includes(c)) db.exec(`ALTER TABLE evidences ADD COLUMN ${c} ${def}`);
   return db;
 }
 

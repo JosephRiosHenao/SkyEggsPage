@@ -3,6 +3,7 @@
 import { randomInt, randomBytes } from "node:crypto";
 import { tx } from "./db.js";
 import { PACK_BY_KEY, bestPack, robuxFor, SPECIAL } from "./program.js";
+import { trackableSite } from "./views.js";
 
 // ---------- Fechas (mismo reloj que el juego: lunes 00:00 UTC-5) ----------
 const OFFSET_S = -5 * 3600;
@@ -133,6 +134,14 @@ export function requestLink(db, discordId, userId, now = Date.now()) {
 // ---------- Evidencias ----------
 export function saveUploadName() { return `${randomBytes(16).toString("hex")}`; }
 
+// Hasta cuándo se refrescan las vistas: el último día en que ese video todavía
+// cuenta para algún reclamo (plazo de su semana o de su mes, el que termine después).
+let cfgGrace = { week: 3, month: 5 };
+export function setGrace(cfg) { cfgGrace = { week: cfg.creators?.claimGraceDaysWeek ?? 3, month: cfg.creators?.claimGraceDaysMonth ?? 5 }; }
+function trackUntil(g, week, month) {
+  return Math.max(weekStartMs(week + 1) + g.week * 86400_000, monthStartMs(nextMonth(month)) + g.month * 86400_000);
+}
+
 export function addEvidence(db, discordId, body, now = Date.now()) {
   const recent = db.prepare("SELECT COUNT(*) AS n FROM evidences WHERE discord_id = ? AND created_at > ?").get(String(discordId), now - 86400_000).n;
   if (recent >= 20) throw new Fail("too_many", 429);
@@ -147,11 +156,45 @@ export function addEvidence(db, discordId, body, now = Date.now()) {
   if (now - pub > 45 * 86400_000) throw new Fail("too_old");
   const file = typeof body?.file === "string" && /^[a-f0-9]{32}\.(png|jpg|webp)$/.test(body.file) ? body.file : null;
   if (db.prepare("SELECT 1 FROM evidences WHERE url = ? AND status != 'rejected'").get(url)) throw new Fail("duplicate_url");
+  const track = trackableSite(url) ? "auto" : "manual";
   const info = db.prepare(`
-    INSERT INTO evidences (discord_id, kind, platform, url, title, published_on, week, month, file, note, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(String(discordId), kind, platform, url, str(body?.title, 120) || null, publishedOn, weekOf(pub), monthOf(pub), file, textBlock(body?.note, 500) || null, now);
-  return { ok: true, id: Number(info.lastInsertRowid) };
+    INSERT INTO evidences (discord_id, kind, platform, url, title, published_on, week, month, file, note, created_at, track, track_until)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(String(discordId), kind, platform, url, str(body?.title, 120) || null, publishedOn, weekOf(pub), monthOf(pub), file, textBlock(body?.note, 500) || null, now,
+    track, trackUntil(cfgGrace, weekOf(pub), monthOf(pub)));
+  return { ok: true, id: Number(info.lastInsertRowid), track };
+}
+
+// ---------- Vistas automáticas ----------
+export function dueForProbe(db, cfg, now = Date.now(), limit = 20) {
+  return db.prepare(`
+    SELECT id, url FROM evidences
+    WHERE track = 'auto' AND status != 'rejected' AND (track_until IS NULL OR track_until > ?)
+      AND (auto_checked_at IS NULL OR auto_checked_at < ?)
+    ORDER BY COALESCE(auto_checked_at, 0) LIMIT ?`).all(now, now - cfg.views.refreshHours * 3_600_000, limit);
+}
+
+// Guarda el resultado de una lectura. Si la evidencia ya está aprobada y es automática,
+// sus vistas pasan a ser las leídas. Tras varios fallos seguidos queda como vistas fijas.
+export function applyProbe(db, cfg, id, result, now = Date.now()) {
+  const ev = db.prepare("SELECT * FROM evidences WHERE id = ?").get(Number(id));
+  if (!ev) return null;
+  return tx(db, () => {
+    if (result.ok) {
+      db.prepare("UPDATE evidences SET auto_views = ?, auto_checked_at = ?, auto_error = NULL, auto_fails = 0, auto_meta = ? WHERE id = ?")
+        .run(result.views, now, JSON.stringify(result.meta || {}), ev.id);
+      if (ev.status === "approved" && ev.track === "auto") {
+        db.prepare("UPDATE evidences SET views = ? WHERE id = ?").run(result.views, ev.id);
+        db.prepare("UPDATE bonuses SET views = ?, robux = ? WHERE evidence_id = ? AND status IN ('pending_mod','pending_admin')").run(result.views, robuxFor(result.views), ev.id);
+      }
+      return { ok: true, views: result.views };
+    }
+    const fails = (ev.auto_fails || 0) + 1;
+    const giveUp = fails >= cfg.views.maxFails;
+    db.prepare(`UPDATE evidences SET auto_error = ?, auto_checked_at = ?, auto_fails = ?${giveUp ? ", track = 'manual'" : ""}${giveUp && ev.status === "approved" ? ", recount = 1" : ""} WHERE id = ?`)
+      .run(String(result.error || "error").slice(0, 200), now, fails, ev.id);
+    return { ok: false, error: result.error, gaveUp: giveUp };
+  });
 }
 
 export function requestRecount(db, discordId, id) {
@@ -210,6 +253,8 @@ export function creatorState(db, cfg, discordId, now = Date.now()) {
       id: e.id, kind: e.kind, platform: e.platform, url: e.url, title: e.title, publishedOn: e.published_on,
       week: e.week, month: e.month, file: e.file, note: e.note, status: e.status, views: e.views, recount: !!e.recount,
       reviewNote: e.review_note, reviewedAt: e.reviewed_at, robuxEligible: robuxFor(e.views),
+      track: e.track, autoViews: e.auto_views, autoCheckedAt: e.auto_checked_at, autoError: e.auto_error,
+      trackUntil: e.track_until, autoMeta: e.auto_meta ? JSON.parse(e.auto_meta) : null,
       bonus: e.bonus_status ? { status: e.bonus_status, robux: e.bonus_robux } : null,
     })),
     claims: db.prepare("SELECT period_type AS type, period_key AS key, pack, views, videos, created_at AS createdAt FROM claims WHERE discord_id = ? ORDER BY id DESC LIMIT 20").all(String(discordId)),
@@ -270,7 +315,8 @@ export function modQueue(db, actor) {
     applications: db.prepare("SELECT * FROM applications WHERE status IN ('pending','contacted') ORDER BY id").all()
       .map((a) => withUser(db, { ...a, platforms: JSON.parse(a.platforms) })),
     links: db.prepare("SELECT * FROM creators WHERE link_status = 'pending' ORDER BY link_requested_at").all().map((c) => withUser(db, c)),
-    evidences: db.prepare("SELECT * FROM evidences WHERE status = 'pending' OR (status = 'approved' AND recount = 1) ORDER BY created_at").all().map((e) => withUser(db, e)),
+    evidences: db.prepare("SELECT * FROM evidences WHERE status = 'pending' OR (status = 'approved' AND recount = 1) ORDER BY created_at").all()
+      .map((e) => withUser(db, { ...e, auto_meta: e.auto_meta ? JSON.parse(e.auto_meta) : null })),
     bonuses: db.prepare(`SELECT b.*, e.url, e.title, e.platform, e.published_on FROM bonuses b JOIN evidences e ON e.id = b.evidence_id
       WHERE b.status IN (${actor.role === "admin" ? "'pending_mod','pending_admin','approved'" : "'pending_mod'"}) ORDER BY b.id`).all().map((b) => withUser(db, b)),
     specials: actor.role === "admin" ? db.prepare("SELECT * FROM specials WHERE status IN ('pending','approved') ORDER BY id").all().map((s) => withUser(db, s)) : [],
@@ -328,7 +374,11 @@ export function reviewEvidence(db, actor, body, now = Date.now()) {
   if (ev.discord_id === String(actor.id)) throw new Fail("own_item", 403);
   const action = body?.action;
   if (!["approve", "reject", "update"].includes(action)) throw new Fail("bad_action");
-  const views = Math.floor(Number(body?.views));
+  // mode "auto": usar las vistas leídas y seguir refrescándolas; "fixed": vistas fijas del moderador.
+  const auto = body?.mode === "auto" && action !== "reject";
+  if (auto && !(ev.track === "auto" || trackableSite(ev.url)) ) throw new Fail("not_trackable");
+  if (auto && ev.auto_views == null) throw new Fail("no_auto_views");
+  const views = auto ? ev.auto_views : Math.floor(Number(body?.views));
   if (action !== "reject" && !(Number.isFinite(views) && views >= 0 && views <= 1e9)) throw new Fail("bad_views");
   if (action === "update" && ev.status !== "approved") throw new Fail("not_approved");
   if (action !== "update" && ev.status !== "pending") throw new Fail("already_reviewed");
@@ -336,12 +386,12 @@ export function reviewEvidence(db, actor, body, now = Date.now()) {
     if (action === "reject") {
       db.prepare("UPDATE evidences SET status = 'rejected', reviewed_by = ?, reviewed_at = ?, review_note = ?, recount = 0 WHERE id = ?").run(actor.name, now, note(body), ev.id);
     } else {
-      db.prepare("UPDATE evidences SET status = 'approved', views = ?, reviewed_by = ?, reviewed_at = ?, review_note = COALESCE(?, review_note), recount = 0 WHERE id = ?")
-        .run(views, actor.name, now, note(body), ev.id);
+      db.prepare("UPDATE evidences SET status = 'approved', views = ?, track = ?, auto_fails = CASE WHEN ? = 'auto' THEN 0 ELSE auto_fails END, reviewed_by = ?, reviewed_at = ?, review_note = COALESCE(?, review_note), recount = 0 WHERE id = ?")
+        .run(views, auto ? "auto" : "manual", auto ? "auto" : "manual", actor.name, now, note(body), ev.id);
       // Un bono aún sin aprobar sigue a las vistas nuevas.
       db.prepare("UPDATE bonuses SET views = ?, robux = ? WHERE evidence_id = ? AND status IN ('pending_mod','pending_admin')").run(views, robuxFor(views), ev.id);
     }
-    audit(db, actor, `evidence.${action}`, nameOf(db, ev.discord_id), { id: ev.id, url: ev.url, before: ev.views, views: action === "reject" ? null : views, note: note(body) });
+    audit(db, actor, `evidence.${action}`, nameOf(db, ev.discord_id), { id: ev.id, url: ev.url, before: ev.views, views: action === "reject" ? null : views, vistas: action === "reject" ? null : auto ? "automáticas" : "fijas", note: note(body) });
     return { ok: true };
   });
 }
