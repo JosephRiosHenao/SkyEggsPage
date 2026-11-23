@@ -74,7 +74,8 @@ export function creatorsDashboard(db, cfg, now = Date.now()) {
       weekViews: wk.v, weekVideos, prevWeekViews: pw.v, monthViews: mo.v, monthVideos: mo.n,
       totalViews: total.v, totalVideos: total.n, lastVideo: last, pendingEvidences: pending,
       robuxPaid: robux.paid, robuxOpen: robux.open, claims: claims.n, lastPack: claims.last,
-      warned: c.warn_week === w, atRisk: tier && levelIndex(tier) > 1 && weekVideos === 0,
+      warned: c.warn_week === w, idleWeeks: c.idle_weeks || 0,
+      atRisk: Boolean(tier && tier !== "None" && weekVideos === 0 && (levelIndex(tier) > 1 || (c.idle_weeks || 0) >= 1)),
       next: next ? { key: next.key, name: next.name, minWeekViews: next.minWeekViews, missing: Math.max(0, next.minWeekViews - wk.v) } : null,
     };
   });

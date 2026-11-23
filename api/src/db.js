@@ -115,7 +115,7 @@ export function openDb(path) {
       platforms TEXT NOT NULL,        -- JSON [{type,url,followers}]
       about TEXT NOT NULL,
       sample_url TEXT,
-      status TEXT NOT NULL DEFAULT 'pending',   -- pending | contacted | approved | rejected
+      status TEXT NOT NULL DEFAULT 'pending',   -- pending | contacted | approved | rejected | removed (salió: puede volver a aplicar)
       created_at INTEGER NOT NULL,
       reviewed_by TEXT, reviewed_at INTEGER, review_note TEXT
     );
@@ -125,7 +125,7 @@ export function openDb(path) {
       roblox_user_id INTEGER,
       roblox_name TEXT,
       roblox_display TEXT,
-      link_status TEXT NOT NULL DEFAULT 'none',  -- none | pending | approved | rejected
+      link_status TEXT NOT NULL DEFAULT 'none',  -- none | pending | approved | rejected | removed (salió del programa)
       link_code TEXT,
       link_requested_at INTEGER,
       link_reviewed_by TEXT, link_reviewed_at INTEGER, link_note TEXT
@@ -213,6 +213,7 @@ export function openDb(path) {
   for (const [c, def] of [
     ["tier", "TEXT"], ["tier_changed_at", "INTEGER"], ["warn_week", "INTEGER"], ["eval_week", "INTEGER"],
     ["public_profile", "INTEGER NOT NULL DEFAULT 1"],
+    ["idle_weeks", "INTEGER NOT NULL DEFAULT 0"],   // semanas completas seguidas sin video
   ]) if (!cols("creators").includes(c)) db.exec(`ALTER TABLE creators ADD COLUMN ${c} ${def}`);
   db.exec(`
     CREATE TABLE IF NOT EXISTS notices (

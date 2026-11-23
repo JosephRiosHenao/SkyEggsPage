@@ -54,6 +54,7 @@
     views_off: "La lectura automática de vistas está apagada en el servidor.",
     bad_tier: "Ese rango no existe.",
     same_tier: "Ya tiene ese rango.",
+    must_reapply: "Saliste del programa: envía una solicitud nueva en la pestaña Aplicar.",
   };
   const LOGIN_ERRORS = {
     discord_off: "El login con Discord todavía no está configurado. Avísale al admin.",
@@ -135,7 +136,8 @@
 
   function tabList() {
     const t = [["inicio", "Inicio"]];
-    if (!isCreator() && !isMod()) t.push(["aplicar", "Aplicar"]);
+    // También quien salió del programa (2 semanas sin video o lo sacó un moderador) vuelve a ver "Aplicar".
+    if ((!isCreator() && !isMod()) || me?.application?.status === "removed") t.push(["aplicar", "Aplicar"]);
     if (isCreator()) t.push(["metas", "Metas"], ["evidencias", "Evidencias"], ["roblox", "Mi Roblox"], ["bonos", "Bonos"]);
     t.push(["comandos", "Comandos"]);
     if (isMod()) t.push(["moderacion", "Moderación"]);
@@ -182,6 +184,9 @@
       if (isCreator()) {
         if (!creator) creator = await api("/api/creators/me");
         const linked = creator.link.status === "approved";
+        if (creator.link.status === "removed") {
+          box.append(el("div", { class: "notice notice--bad" }, "Saliste del programa de creadores (2 semanas seguidas sin videos o lo decidió un moderador). Perdiste el rango del juego y el rol de Discord. Vuelve a aplicar en la pestaña Aplicar."));
+        }
         add(true, "Eres Content Creator", "Tienes el rol en Discord. ¡Bienvenido al programa!");
         add(linked, "Vincula tu cuenta de Roblox", linked ? `Vinculada: @${creator.link.roblox.name}` : creator.link.status === "pending" ? "En revisión: pon el código en tu perfil de Roblox." : "Necesaria para recibir premios en el juego.", linked ? null : "roblox");
         add(creator.evidences.length > 0, "Sube tu primer video o directo", "Un moderador anota las vistas.", "evidencias");
@@ -212,13 +217,14 @@
     async aplicar(s) {
       const a = me.application;
       const box = el("div", { class: "box", id: "aplicar" }, el("h2", {}, "Aplica al programa"));
-      if (a && a.status !== "rejected") {
+      if (a && a.status !== "rejected" && a.status !== "removed") {
         const map = { pending: ["pending", "En revisión", "Un moderador la revisará pronto y te escribirá por Discord."], contacted: ["contacted", "Contactado", "Un moderador te escribió por Discord. Revisa tus mensajes."], approved: ["approved", "Aprobada", "Espera a que te den el rol de Content Creator en Discord y vuelve a entrar en esta página."] };
         const [cls, label, text] = map[a.status];
         box.append(el("p", {}, "Estado de tu solicitud: ", pill(cls, label)), el("p", { class: "muted" }, text));
         if (a.review_note) box.append(el("p", {}, el("strong", {}, "Nota del moderador: "), a.review_note));
         return s.replaceChildren(box);
       }
+      if (a?.status === "removed") box.append(el("div", { class: "notice notice--bad" }, `Saliste del programa${a.review_note ? `: ${a.review_note}` : "."} Puedes volver a aplicar cuando quieras.`));
       if (a?.status === "rejected") box.append(el("div", { class: "notice notice--bad" }, `Tu última solicitud fue rechazada${a.review_note ? `: ${a.review_note}` : "."} Puedes volver a aplicar 7 días después.`));
       const platformRow = (i) => el("div", { class: "row" },
         el("label", {}, "Red", el("select", { name: `ptype${i}` }, ...["YouTube", "TikTok", "Twitch", "Kick", "Instagram", "Facebook", "Otra"].map((p) => el("option", {}, p)))),
@@ -369,6 +375,10 @@
         box.append(el("div", { class: "notice" }, "En revisión: un moderador confirmará que esta es tu cuenta."),
           accountChip({ ...l.roblox, avatar: null }));
       }
+      if (l.status === "removed") {
+        box.append(el("div", { class: "notice notice--bad" }, "Saliste del programa: para volver tienes que enviar una solicitud nueva (pestaña Aplicar)."));
+        return s.replaceChildren(box);
+      }
       if (l.status === "rejected") box.append(el("div", { class: "notice notice--bad" }, `La vinculación anterior fue rechazada${l.note ? `: ${l.note}` : "."} Puedes pedirla otra vez.`));
       box.append(
         el("p", { class: "muted mt" }, l.status === "pending" ? "¿Te equivocaste de cuenta? Elige la correcta:" : "Elige tu cuenta de Roblox. Tiene que haber jugado Sky Eggs al menos una vez."),
@@ -513,7 +523,7 @@
         el("div", { class: "item__actions" }, note,
           a.status === "pending" ? btn("Contactado", "btn--white", (b) => act(b, () => api("/api/mod/application", { id: a.id, action: "contacted", note: note.value }), "Marcada como contactada.", refreshMod)) : null,
           btn("Aprobar (y confirmar su Roblox)", "btn--green", (b) => act(b, () => api("/api/mod/application", { id: a.id, action: "approve", note: note.value }), (o) => `Aprobada${o.linked ? " y cuenta de Roblox vinculada" : ""}. ${o.discordRole === "ok" ? "El rol de Content Creator se puso solo en Discord." : o.discordRole === "error" ? "No se pudo poner el rol en Discord: dáselo a mano." : "Dale el rol de Content Creator en Discord."} El rango Creator y el correo de bienvenida llegan solos al juego.`, refreshMod)),
-          btn("Rechazar", "btn--red", (b) => { if (!note.value.trim()) return flash("Escribe el motivo en la nota.", "bad"); act(b, () => api("/api/mod/application", { id: a.id, action: "reject", note: note.value }), "Rechazada.", refreshMod); })));
+          btn("Rechazar", "btn--red", (b) => { if (!note.value.trim()) return flash("Escribe el motivo en la nota.", "bad"); act(b, () => api("/api/mod/application", { id: a.id, action: "reject", note: note.value }), (o) => `Rechazada.${o.discordRole === "removed" ? " Se le quitó el rol de Content Creator en Discord." : o.discordRole === "error" ? " No se pudo quitar el rol en Discord: hazlo a mano si lo tenía." : ""} Si tenía rango en el juego, se le quita al entrar.`, refreshMod); })));
     });
     body.replaceChildren(...(items.length ? [el("div", { class: "list" }, ...items)] : [empty("No hay solicitudes pendientes.")]));
   }
@@ -605,6 +615,9 @@
     promoted: (p) => `⬆️ Subió a ${levelName(p)}`,
     demotion_warning: (p) => `⚠️ Aviso: sin video esta semana, puede bajar de ${levelName(p)}`,
     demoted: (p) => `⬇️ Bajó de ${levelName(p)} a Creator (semana sin videos)`,
+    removal_warning: () => "🚨 Aviso: segunda semana sin video, saldrá del programa el domingo",
+    removed_inactive: () => "🚪 Salió del programa: 2 semanas seguidas sin videos",
+    rejected: () => "❌ Solicitud rechazada: rango del juego quitado",
     legacy_join: (p) => `📨 Creador antiguo: aplicar antes del ${p}`,
     legacy_removed: (p) => (p === "rejected" ? "❌ Rango quitado: solicitud rechazada" : "❌ Rango quitado: no aplicó a tiempo"),
     removed: () => "❌ Sacado del programa",
@@ -623,11 +636,12 @@
       box.append(el("p", {}, `Esta semana llevas ${n(r.weekViews)} vistas aprobadas. Con ${n(next.minWeekViews)} subes a ${next.emoji} ${next.name} (te faltan ${n(Math.max(0, next.minWeekViews - r.weekViews))}).`),
         el("div", { class: "track", role: "img", "aria-label": `${n(r.weekViews)} de ${n(next.minWeekViews)} vistas` }, el("div", { class: "track__fill", "data-w": pct })));
     } else box.append(el("p", {}, "¡Estás en el nivel más alto! Mantén al menos un video por semana."));
-    if (idx > 0) {
+    if (idx > 0 || r.idleWeeks >= 1) {
       box.append(r.weekVideos > 0
         ? el("p", { class: "small muted" }, `✅ Ya subiste ${r.weekVideos} ${r.weekVideos === 1 ? "video" : "videos"} esta semana: conservas tu nivel.`)
         : el("div", { class: "notice notice--bad" }, `Aún no subes ningún video esta semana. Si llega el domingo ${day(r.weekEndsAt - 1)} sin video, vuelves a Creator.`));
     }
+    if (r.idleWeeks >= 1 && r.weekVideos === 0) box.append(el("div", { class: "notice notice--bad" }, `🚨 La semana pasada no subiste videos. Si esta semana tampoco subes ninguno (antes del domingo ${day(r.weekEndsAt - 1)}), sales del programa y tendrás que volver a aplicar.`));
     box.append(el("p", { class: "small muted" }, "Los niveles suben solos con las vistas de la semana (lunes a domingo). El juego y Discord se actualizan solos y te llega un correo al buzón."));
     return box;
   }
@@ -672,7 +686,7 @@
     const tierFilter = el("select", {}, el("option", { value: "" }, "Todos los rangos"), ...LEVEL_ORDER.map((k) => el("option", { value: k }, levelName(k))), el("option", { value: "risk" }, "En riesgo"), el("option", { value: "other" }, "Sin aprobar / fuera"));
     const tableBox = el("div", { class: "scrollx" });
     const detailBox = el("div");
-    const label = { approved: "Vinculado", pending: "En revisión", rejected: "Rechazado", none: "Sin vincular" };
+    const label = { approved: "Vinculado", pending: "En revisión", rejected: "Rechazado", removed: "Salió del programa", none: "Sin vincular" };
     const paint = () => {
       const q = filter.value.trim().toLowerCase();
       const tf = tierFilter.value;
@@ -699,7 +713,7 @@
             el("td", {}, n(c.monthViews), el("div", { class: "small muted" }, `${c.monthVideos} videos`)),
             el("td", {}, n(c.totalViews), el("div", { class: "small muted" }, `${c.totalVideos} videos · ${n(c.robuxPaid)} R$`)),
             el("td", {}, c.lastVideo || "—"),
-            el("td", {}, c.atRisk ? pill(c.warned ? "pending_mod" : "pending", c.warned ? "Avisado: sin video" : "Sin video esta semana") : c.linkStatus === "approved" && c.tier !== "None" ? pill("approved", "Al día") : pill("rejected", c.tier === "None" ? "Fuera" : label[c.linkStatus] || "—"),
+            el("td", {}, c.atRisk ? pill(c.warned ? "pending_mod" : "pending", c.idleWeeks >= 1 ? (c.warned ? "Avisado: saldrá del programa" : "2.ª semana sin video") : c.warned ? "Avisado: sin video" : "Sin video esta semana") : c.linkStatus === "approved" && c.tier !== "None" ? pill("approved", "Al día") : pill("rejected", c.tier === "None" ? "Fuera" : label[c.linkStatus] || "—"),
               c.pendingEvidences ? el("div", { class: "small muted" }, `${c.pendingEvidences} por revisar`) : null),
             el("td", {}, btn("Ver", "btn--white", () => showCreator(detailBox, c))));
         }))) : empty("Nadie coincide con el filtro."));
@@ -708,7 +722,7 @@
     tierFilter.addEventListener("change", paint);
     paint();
     body.replaceChildren(
-      el("p", { class: "small muted" }, `Los rangos suben solos con las vistas semanales (Activo ${n(3000)}, Viral ${n(3500)}, Estrella ${n(4500)}, Elite ${n(5000)}) y bajan a Creator tras una semana sin videos. Fecha límite de los creadores antiguos: ${new Date(s.legacyDeadline).toLocaleDateString("es-CO", { dateStyle: "long" })}.`),
+      el("p", { class: "small muted" }, `Los rangos suben solos con las vistas semanales (Activo ${n(3000)}, Viral ${n(3500)}, Estrella ${n(4500)}, Elite ${n(5000)}) bajan a Creator tras una semana sin videos y con 2 semanas seguidas sin videos el creador sale del programa (pierde el rango y el rol de Discord y tiene que volver a aplicar). Fecha límite de los creadores antiguos: ${new Date(s.legacyDeadline).toLocaleDateString("es-CO", { dateStyle: "long" })}.`),
       tiles, tiers, el("div", { class: "split" }, el("div", {}, weekBars(d.weeks)), el("div", {}, el("h3", {}, "Redes este mes"), plat)),
       el("h3", { class: "mt" }, "Todos los creadores"), el("div", { class: "form-actions" }, filter, tierFilter), tableBox, detailBox);
   }

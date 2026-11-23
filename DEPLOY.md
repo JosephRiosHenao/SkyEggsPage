@@ -195,7 +195,7 @@ Sin librerías: la API usa la REST de Discord (`PUT/DELETE /guilds/{servidor}/me
 1. En la misma aplicación de Discord → **Bot** → **Reset Token** y copia el token (nunca lo pegues en un chat ni en el repo).
 2. **OAuth2 → URL Generator**: marca `bot` y el permiso **Manage Roles**; abre la URL e invita el bot al servidor de Sky Eggs.
 3. En Ajustes del servidor → **Roles**, arrastra el rol del bot **por encima** de Content Creator y de los roles de rango (si queda debajo, Discord responde 403).
-4. (Opcional) Crea un rol por rango (Activo, Viral, Estrella, Elite) y copia sus IDs.
+4. Hoy hay un solo rol (Content Creator `1561051688125730897`) para todos los niveles: no hace falta nada más. Solo si algún día creas un rol por nivel, copia sus IDs.
 5. En `.env`: `DISCORD_BOT_TOKEN=…` y, si los creaste, `DISCORD_ROLE_CREATOR_ACTIVE/VIRAL/STAR/ELITE`. `docker compose up -d skyeggs-api`.
 
 Prueba: en Moderación → "Creadores y métricas" la tarjeta "roles de Discord" dice **Automático**. Cada cambio queda en el Registro ("actualizó los roles de Discord de…" o el error).
@@ -203,7 +203,7 @@ Prueba: en Moderación → "Creadores y métricas" la tarjeta "roles de Discord"
 ### Cómo funciona
 
 - **Aspirante** (sin rol): llena la solicitud. **Moderador**: la revisa, contacta, aprueba o rechaza. Al aprobar, el juego recibe solo el rango **Creator** (tag + permisos de HD Admin) y un correo de bienvenida; con el bot, también el rol de Discord.
-- **Rangos automáticos** (`api/src/lifecycle.js`, cada 15 min y al aprobar evidencias): Activo 3.000, Viral 3.500, Estrella 4.500 y Elite 5.000 vistas aprobadas en la semana. Si una semana entera no sube ningún video, vuelve a Creator (aviso al buzón 3 días antes; la bajada se aplica 24 h después del domingo). Los packs ya no suben el rango.
+- **Rangos automáticos** (`api/src/lifecycle.js`, cada 15 min y al aprobar evidencias): Activo 3.000, Viral 3.500, Estrella 4.500 y Elite 5.000 vistas aprobadas en la semana. Si una semana entera no sube ningún video, vuelve a Creator; con **2 semanas seguidas** sin videos sale del programa (rango del juego `None`, rol de Discord quitado, solicitud marcada `removed`: tiene que volver a aplicar). Aviso al buzón 3 días antes; los cambios se aplican 24 h después del domingo. Rechazar una solicitud también quita el rango del juego y el rol de Discord si los tenía. Los packs ya no suben el rango.
 - **Creadores antiguos**: el juego manda el nivel de creador de cada jugador en `/game/pull`. Si tiene rango pero no está aprobado en la página, recibe un aviso al buzón y tiene 3 días para aplicar (sin pasar del 1 de enero de 2027). Si no aplica, o lo rechazan, pierde el rango al entrar al juego. Pestaña "Creadores antiguos" en Moderación.
 - **Avisos al buzón**: kind `notice` (texto en `WebRewardServiceConfig.CreatorNotices` del juego) y cambios de rango kind `tierset`. Pestaña "Avisos" en Moderación.
 - **Creador**: su cuenta de Roblox se elige de la lista de jugadores que ya entraron a Sky Eggs (si no aparece, tiene que jugar primero) y el moderador la confirma al aprobar la solicitud, sube evidencias (enlace + captura opcional), ve sus metas y reclama **1 pack por semana** (hasta 3 días después del domingo) y **1 por mes** (hasta 5 días después). El juego entrega el pack al buzón con `CreatorService.SendReward` (mismo id `cr-<periodo>-<userId>`: no se duplica con `;CreatorReward`).

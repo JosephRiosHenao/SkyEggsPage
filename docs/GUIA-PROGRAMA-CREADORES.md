@@ -31,7 +31,7 @@ Mínimo 1 video o directo aprobado. **Se reclama una vez por semana**: el creado
 
 ### Niveles (automáticos desde el 23/11/2026)
 
-Los packs ya no suben el nivel: sube solo con las vistas aprobadas de la semana y baja a Creator si pasa una semana entera sin videos (aviso por el buzón 3 días antes).
+Los packs ya no suben el nivel: sube solo con las vistas aprobadas de la semana, baja a Creator si pasa una semana entera sin videos y, con 2 semanas seguidas sin videos, el creador sale del programa y tiene que volver a aplicar (aviso por el buzón 3 días antes en los dos casos). Rechazar una solicitud también quita el rango del juego y el rol de Discord si los tenía.
 
 | Vistas en la semana | Nivel |
 |---|---|
@@ -71,7 +71,7 @@ Todo lo del juego llega al **buzón del Lobby**. Si el creador no está conectad
 9. **Reclama** (pestaña Metas) cuando quieras. La barra muestra cuánto te falta para la siguiente meta.
 10. **Abre el buzón** en el juego: ahí está tu premio.
 11. **Tu nivel sube solo** con las vistas aprobadas de la semana (lunes a domingo): 3.000 Creator Activo, 3.500 Viral, 4.500 Estrella, 5.000 Elite. Te llega un correo al buzón y el juego te da los comandos nuevos.
-12. **Sube al menos un video por semana.** Si una semana entera no subes nada vuelves a Creator. El viernes te avisamos por el buzón si aún no subiste nada esa semana.
+12. **Sube al menos un video por semana.** Si una semana entera no subes nada vuelves a Creator; con **2 semanas seguidas** sin videos sales del programa (pierdes el rango del juego y el rol de Discord) y tienes que enviar una solicitud nueva. El viernes te avisamos por el buzón si aún no subiste nada esa semana.
 13. **En Inicio** puedes elegir si tu perfil (nombre de Roblox, foto, nivel y redes) sale en el carrusel de la portada.
 14. **¿Más de 10.000 vistas en un video?** Pide el bono de Robux desde la evidencia. **¿100.000 en el mes?** Haz tu pedido especial en la pestaña Bonos.
 

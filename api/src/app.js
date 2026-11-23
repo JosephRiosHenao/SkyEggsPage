@@ -473,6 +473,15 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
           out.discordRole = r[0]?.ok ? "ok" : "error";
         } else out.discordRole = "manual";
       }
+      // Rechazada: si tenía el rol de Content Creator (p. ej. creador antiguo), se le quita.
+      if (out.status === "rejected" && botEnabled(cfg)) {
+        const app = db.prepare("SELECT discord_id FROM applications WHERE id = ?").get(Number(b.id));
+        const linked = app && db.prepare("SELECT 1 FROM creators WHERE discord_id = ? AND link_status = 'approved'").get(app.discord_id);
+        if (app && !linked) {
+          const r = await runRoleJobs(db, cfg, [{ discordId: app.discord_id, tierKey: "None", reason: "solicitud rechazada" }], fetchImpl, log);
+          out.discordRole = r[0]?.ok ? "removed" : "error";
+        }
+      }
       return out;
     },
     "POST /api/mod/link": async (req) => { checkOrigin(req); const a = staffActor(req); const b = await readJson(req, 2048); return run(() => C.reviewLink(db, a, b)); },

@@ -83,7 +83,7 @@ export function myApplication(db, discordId) {
 export function submitApplication(db, discordId, body, now = Date.now()) {
   const last = myApplication(db, discordId);
   if (last && (last.status === "pending" || last.status === "contacted")) throw new Fail("already_pending");
-  if (last && last.status === "approved") throw new Fail("already_approved");
+  if (last && last.status === "approved" && getCreator(db, discordId)?.link_status === "approved") throw new Fail("already_approved");
   if (last && last.status === "rejected" && now - (last.reviewed_at || last.created_at) < 7 * 86400_000) throw new Fail("wait_after_reject");
   if (body?.age13 !== true) throw new Fail("age_required");
   const player = playedPlayer(db, body?.robloxUserId);
@@ -123,6 +123,8 @@ export function requestLink(db, discordId, userId, now = Date.now()) {
   userId = player.user_id;
   const cur = getCreator(db, discordId);
   if (cur && cur.link_status === "approved") throw new Fail("already_linked");
+  // Salió del programa: tiene que volver a aplicar (no basta con vincular otra vez).
+  if (cur && cur.link_status === "removed") throw new Fail("must_reapply");
   const taken = db.prepare("SELECT discord_id FROM creators WHERE roblox_user_id = ? AND link_status = 'approved'").get(userId);
   if (taken) throw new Fail("roblox_taken");
   db.prepare(`
@@ -273,6 +275,7 @@ export function creatorState(db, cfg, discordId, now = Date.now()) {
       weekVideos: db.prepare("SELECT COUNT(*) AS n FROM evidences WHERE discord_id = ? AND status != 'rejected' AND week = ?").get(String(discordId), w).n,
       weekEndsAt: weekStartMs(w + 1),
       warned: link.warn_week === w,
+      idleWeeks: link.idle_weeks || 0,
     } : null,
     publicProfile: link ? link.public_profile !== 0 : true,
     notices: link?.roblox_user_id ? db.prepare("SELECT kind, param, created_at AS createdAt FROM notices WHERE roblox_user_id = ? ORDER BY id DESC LIMIT 15").all(link.roblox_user_id) : [],
@@ -378,6 +381,15 @@ export function reviewApplication(db, actor, body, now = Date.now()) {
       if (!taken && p) {
         approveLink(db, actor, a.discord_id, a.roblox_user_id, p.name, p.display_name, now);
         linked = true;
+      }
+    }
+    // Rechazada: no puede quedar con el rango de creador en el juego (p. ej. un creador antiguo).
+    if (status === "rejected" && a.roblox_user_id) {
+      const approved = db.prepare("SELECT 1 FROM creators WHERE roblox_user_id = ? AND link_status = 'approved'").get(a.roblox_user_id);
+      const p = db.prepare("SELECT creator_tier FROM players WHERE user_id = ?").get(a.roblox_user_id);
+      if (!approved && (p?.creator_tier == null || p.creator_tier > 0)) {
+        queueTierSet(db, a.roblox_user_id, "None", now);
+        if (p?.creator_tier > 0) queueNotice(db, { robloxUserId: a.roblox_user_id, discordId: a.discord_id, kind: "rejected", param: "", actor: actor.name }, now);
       }
     }
     audit(db, actor, `application.${action}`, nameOf(db, a.discord_id), { id: a.id, roblox: `${a.roblox_name}${a.roblox_user_id ? ` (${a.roblox_user_id})` : ""}`, vinculada: linked || null, note: note(body) });

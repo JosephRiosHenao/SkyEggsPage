@@ -496,3 +496,57 @@ test("roles de Discord con el bot: pone el del rango y quita los demás", async 
   c.discord.botToken = "";
   assert.equal((await setMemberRoles(c, "123456789", { add: ["1"] }, "x", fake)).skipped, true);
 });
+
+test("2 semanas seguidas sin video: sale del programa (juego y Discord) y puede volver a aplicar", () => {
+  const db = openDb(":memory:"); const c = cfgAuto();
+  const t0 = Date.parse("2026-11-02T10:00:00-05:00"); // semana 2966
+  seedRoblox(db, c, 900, "Inactivo_1"); seedUser(db, "ina", { creator: true });
+  const app = C.submitApplication(db, "ina", { robloxUserId: 900, age13: true, platforms: [{ type: "YouTube", url: "https://youtube.com/@ina" }], about: "Prometo videos cada semana." }, t0);
+  C.reviewApplication(db, actor("mod"), { id: app.id, action: "approve" }, t0);
+  db.prepare("UPDATE creators SET tier = 'Viral' WHERE discord_id = 'ina'").run();
+  db.prepare("UPDATE rewards SET status = 'delivered'").run();
+  // Semana 2967 con video: racha 0
+  C.addEvidence(db, "ina", { url: "https://youtu.be/i1", platform: "YouTube", publishedOn: "2026-11-10" }, Date.parse("2026-11-10T10:00:00-05:00"));
+  evaluateCreators(db, c, Date.parse("2026-11-17T02:00:00-05:00"));
+  assert.equal(C.getCreator(db, "ina").idle_weeks, 0);
+  // Semana 2968 sin video → baja a Creator (racha 1)
+  let out = evaluateCreators(db, c, Date.parse("2026-11-24T02:00:00-05:00"));
+  assert.equal(out.changes[0].to, "Creator");
+  assert.equal(C.getCreator(db, "ina").idle_weeks, 1);
+  db.prepare("UPDATE rewards SET status = 'delivered'").run();
+  // Viernes de la semana 2969 sin video → aviso de salida
+  out = evaluateCreators(db, c, Date.parse("2026-11-27T08:00:00-05:00"));
+  assert.equal(out.warnings, 1);
+  assert.deepEqual(pendingOf(db, 900), ["notice:removal_warning:Creator"]);
+  db.prepare("UPDATE rewards SET status = 'delivered'").run();
+  // Semana 2969 sin video → sale del programa
+  out = evaluateCreators(db, c, Date.parse("2026-12-01T02:00:00-05:00"));
+  assert.deepEqual(out.changes, [{ discordId: "ina", from: "Creator", to: "None" }]);
+  assert.equal(out.roleJobs[0].tierKey, "None");
+  assert.deepEqual(pendingOf(db, 900), ["tierset:None", "notice:removed_inactive:Creator"]);
+  assert.equal(C.getCreator(db, "ina").link_status, "removed");
+  assert.equal(C.myApplication(db, "ina").status, "removed");
+  assert.throws(() => C.requestLink(db, "ina", 900), /must_reapply/);
+  assert.throws(() => C.claimPack(db, c, "ina", { period: "week" }), /link_required/);
+  // Vuelve a aplicar y al aprobarlo entra otra vez como Creator
+  const again = C.submitApplication(db, "ina", { robloxUserId: 900, age13: true, platforms: [{ type: "YouTube", url: "https://youtube.com/@ina" }], about: "Vuelvo con más videos." }, Date.parse("2026-12-02T10:00:00-05:00"));
+  C.reviewApplication(db, actor("mod"), { id: again.id, action: "approve" }, Date.parse("2026-12-02T11:00:00-05:00"));
+  const back = C.getCreator(db, "ina");
+  assert.equal(back.link_status, "approved");
+  assert.equal(back.tier, "Creator");
+  assert.equal(back.idle_weeks, 0);
+});
+
+test("solicitud rechazada: se quita el rango del juego si lo tenía", () => {
+  const db = openDb(":memory:"); const c = cfgAuto();
+  const t0 = Date.parse("2026-11-23T10:00:00-05:00");
+  gamePull(db, c, { players: [{ userId: 950, name: "Antiguo_X", level: 30, creatorTier: 2 }] }, t0);
+  db.prepare("UPDATE rewards SET status = 'delivered'").run();
+  seedUser(db, "ax", {});
+  const app = C.submitApplication(db, "ax", { robloxUserId: 950, age13: true, platforms: [{ type: "TikTok", url: "https://tiktok.com/@ax" }], about: "Soy creador antiguo." }, t0);
+  C.reviewApplication(db, actor("mod"), { id: app.id, action: "reject", note: "Sin videos de Sky Eggs" }, t0 + 3600_000);
+  assert.deepEqual(pendingOf(db, 950), ["tierset:None", "notice:rejected"]);
+  // El siguiente pull no duplica la quita
+  gamePull(db, c, { players: [{ userId: 950, name: "Antiguo_X", level: 30, creatorTier: 2 }] }, t0 + 7200_000);
+  assert.deepEqual(pendingOf(db, 950), ["tierset:None", "notice:rejected"]);
+});
