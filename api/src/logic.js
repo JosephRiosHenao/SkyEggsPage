@@ -1,4 +1,5 @@
 // Reglas del sorteo, premios, códigos y métricas. Sin HTTP: así se puede probar directo.
+import { handleGameCreator } from "./lifecycle.js";
 import { randomInt, randomBytes } from "node:crypto";
 import { TIERS, PRIZE_TIERS } from "./config.js";
 import { tx } from "./db.js";
@@ -98,7 +99,10 @@ function cleanPlayer(p) {
   if (!/^[A-Za-z0-9_]{3,20}$/.test(name)) return null;
   const displayName = typeof p.displayName === "string" && p.displayName.length ? p.displayName.slice(0, 32) : name;
   const level = Number.isFinite(Number(p.level)) ? Math.max(0, Math.min(1e6, Math.floor(Number(p.level)))) : null;
-  return { userId, name, displayName, level };
+  // Nivel de creador que tiene en el juego (0 = ninguno, 1 = Creator … 5 = Elite). Solo lo manda /pull.
+  const ct = Number(p.creatorTier);
+  const creatorTier = Number.isInteger(ct) && ct >= 0 && ct <= 5 ? ct : null;
+  return { userId, name, displayName, level, creatorTier };
 }
 const cleanJob = (j) => (typeof j === "string" ? j.replace(/[^A-Za-z0-9-]/g, "").slice(0, 64) : "") || "studio";
 
@@ -125,6 +129,8 @@ export function gamePull(db, cfg, body, now = Date.now()) {
     const rewards = [];
     for (const p of players) {
       upsertGamePlayer(db, p, day, now);
+      // Creadores antiguos (aviso / quitar el rol) y nivel actual en el juego.
+      if (p.creatorTier != null) handleGameCreator(db, cfg, p, now);
       const lowLevel = cfg.minLevel > 0 && !(p.level >= cfg.minLevel);
       // Por debajo del nivel mínimo solo llegan los regalos del staff y lo del programa de creadores.
       for (const r of pending.all(p.userId)) {

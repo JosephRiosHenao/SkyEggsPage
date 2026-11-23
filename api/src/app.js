@@ -5,8 +5,12 @@ import { join } from "node:path";
 import { doRoll, gamePull, gameAck, gameRedeem, recordVisit, metrics, remainingToday, adminCreateCodes, adminListCodes, adminGift } from "./logic.js";
 import { searchPlayers } from "./roblox.js";
 import { safeEqual, verifyPassword, createSession, checkSession, getSession, deleteSession, readCookie, COOKIE, SESSION_MS, USER_COOKIE, USER_SESSION_MS } from "./auth.js";
-import { discordEnabled, authorizeUrl, fetchDiscordIdentity, rolesFrom, notifyMods } from "./discord.js";
+import { discordEnabled, authorizeUrl, fetchDiscordIdentity, rolesFrom, notifyMods, botEnabled, rolesForTier, setMemberRoles } from "./discord.js";
+import { evaluateCreators, setCreatorTier, legacyList, noticeList } from "./lifecycle.js";
+import { publicCreators, clearPublicCache, creatorsDashboard, creatorDetail } from "./insights.js";
+import { LEVEL_KEYS } from "./program.js";
 import { publicProgram } from "./program.js";
+import { tx } from "./db.js";
 import * as C from "./creators.js";
 import { probeViews, updateYtDlp } from "./views.js";
 
@@ -55,6 +59,41 @@ export function startViewsTracker({ db, cfg, probe = probeViews, log = console }
   return () => clearInterval(timer);
 }
 
+// Pone/quita los roles de Discord de cada cambio de rango (si hay bot). Nunca lanza.
+export async function runRoleJobs(db, cfg, jobs, fetchImpl = fetch, log = console) {
+  if (!jobs?.length || !botEnabled(cfg)) return [];
+  const results = [];
+  for (const job of jobs) {
+    const roles = rolesForTier(cfg, job.tierKey);
+    const r = await setMemberRoles(cfg, job.discordId, roles, `Sky Eggs creadores: ${job.reason || job.tierKey}`, fetchImpl);
+    if (r.ok) db.prepare("UPDATE discord_users SET is_creator = ? WHERE id = ?").run(job.tierKey === "None" ? 0 : 1, String(job.discordId));
+    else log.warn(`[discord] roles de ${job.discordId}: ${r.errors.join(", ")}`);
+    C.audit(db, { id: "system", name: "Bot de Discord", role: "system" }, r.ok ? "discord.roles" : "discord.roles_error", `#${job.discordId}`, { rango: job.tierKey, hecho: r.done.join(" ") || null, errores: r.errors.join(" · ") || null });
+    results.push(r);
+  }
+  return results;
+}
+
+// Rangos automáticos: revisa a los creadores cada 15 min (ascensos, avisos y bajadas).
+export function startLifecycle({ db, cfg, fetchImpl = fetch, log = console }) {
+  let running = false;
+  const tick = async () => {
+    if (running) return;
+    running = true;
+    try {
+      const out = evaluateCreators(db, cfg);
+      if (out.changes.length || out.warnings) {
+        log.info(`[creadores] ${out.changes.length} cambio(s) de rango, ${out.warnings} aviso(s)`);
+        clearPublicCache();
+      }
+      await runRoleJobs(db, cfg, out.roleJobs, fetchImpl, log);
+    } catch (e) { log.error("[creadores]", e); } finally { running = false; }
+  };
+  const timer = setInterval(tick, 15 * 60_000);
+  setTimeout(tick, 20_000);
+  return () => clearInterval(timer);
+}
+
 export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (c, u) => probeViews(c, u, fetchImpl) }) {
   C.setGrace(cfg);
   const limits = {
@@ -67,6 +106,7 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
     apply: new Limiter(5, 3_600_000),
     upload: new Limiter(30, 3_600_000),
     creator: new Limiter(60, 60_000),
+    publicList: new Limiter(30, 60_000),
   };
   const ipOf = (req) => String(req.headers[cfg.ipHeader] || req.socket.remoteAddress || "?").split(",")[0].trim().slice(0, 64);
   // Identificador de visitante no reversible (cambia cada día).
@@ -307,6 +347,19 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
 
     // ----- Programa de creadores -----
     "GET /api/creators/program": async () => publicProgram(cfg),
+    // Carrusel: creadores aprobados que no ocultaron su perfil (nombre, foto, rango y redes).
+    "GET /api/creators/public": async (req) => {
+      if (!limits.publicList.take(ipOf(req))) throw new HttpError(429, "slow_down");
+      return publicCreators(db, cfg, fetchImpl);
+    },
+    "POST /api/creators/public-profile": async (req) => {
+      checkOrigin(req);
+      const u = requireCreator(req);
+      const body = await readJson(req, 256);
+      const out = run(() => C.setPublicProfile(db, u.id, body.on === true));
+      clearPublicCache();
+      return out;
+    },
     "POST /api/creators/apply": async (req) => {
       checkOrigin(req);
       const u = requireUser(req);
@@ -385,11 +438,64 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
     // ----- Moderación (moderadores y admin) -----
     "GET /api/mod/queue": async (req) => { const a = staffActor(req); return { actor: a, ...C.modQueue(db, a) }; },
     "GET /api/mod/applications": async (req, url) => { staffActor(req); return { applications: C.modApplications(db, url.searchParams.get("status") || "all") }; },
-    "GET /api/mod/creators": async (req) => { staffActor(req); return { creators: C.creatorsOverview(db) }; },
+    "GET /api/mod/creators": async (req) => { staffActor(req); return { ...creatorsDashboard(db, cfg), bot: botEnabled(cfg) }; },
+    "GET /api/mod/creator": async (req, url) => {
+      staffActor(req);
+      const d = creatorDetail(db, url.searchParams.get("discordId") || "");
+      if (!d) throw new HttpError(404, "not_found");
+      return d;
+    },
+    "GET /api/mod/notices": async (req, url) => { staffActor(req); return { notices: noticeList(db, { limit: Number(url.searchParams.get("limit")) || 200 }) }; },
+    "GET /api/mod/legacy": async (req) => { staffActor(req); return { legacy: legacyList(db), deadline: cfg.creators.legacyDeadline, days: cfg.creators.legacyNoticeDays }; },
+    // Corrección manual del rango (o "None" para sacarlo del programa). Avisa por el buzón y en Discord.
+    "POST /api/mod/creator/tier": async (req) => {
+      checkOrigin(req);
+      const a = staffActor(req);
+      const b = await readJson(req, 1024);
+      const tier = String(b.tier || "");
+      if (tier !== "None" && !LEVEL_KEYS.includes(tier)) throw new HttpError(400, "bad_tier");
+      if (String(b.discordId) === String(a.id)) throw new HttpError(403, "own_item");
+      const job = run(() => tx(db, () => setCreatorTier(db, a, b.discordId, tier, tier === "None" ? "removed" : null)));
+      if (!job) throw new HttpError(400, "same_tier");
+      clearPublicCache();
+      const roles = await runRoleJobs(db, cfg, [job], fetchImpl, log);
+      return { ok: true, tier, discord: botEnabled(cfg) ? (roles[0]?.ok ? "ok" : "error") : "manual" };
+    },
     "GET /api/mod/audit": async (req, url) => { staffActor(req); return { audit: C.auditList(db, Number(url.searchParams.get("limit")) || 150) }; },
-    "POST /api/mod/application": async (req) => { checkOrigin(req); const a = staffActor(req); const b = await readJson(req, 2048); return run(() => C.reviewApplication(db, a, b)); },
+    "POST /api/mod/application": async (req) => {
+      checkOrigin(req); const a = staffActor(req); const b = await readJson(req, 2048);
+      const out = run(() => C.reviewApplication(db, a, b));
+      if (out.status === "approved") {
+        const app = db.prepare("SELECT discord_id FROM applications WHERE id = ?").get(Number(b.id));
+        clearPublicCache();
+        if (app && botEnabled(cfg)) {
+          const r = await runRoleJobs(db, cfg, [{ discordId: app.discord_id, tierKey: "Creator", reason: "solicitud aprobada" }], fetchImpl, log);
+          out.discordRole = r[0]?.ok ? "ok" : "error";
+        } else out.discordRole = "manual";
+      }
+      // Rechazada: si tenía el rol de Content Creator (p. ej. creador antiguo), se le quita.
+      if (out.status === "rejected" && botEnabled(cfg)) {
+        const app = db.prepare("SELECT discord_id FROM applications WHERE id = ?").get(Number(b.id));
+        const linked = app && db.prepare("SELECT 1 FROM creators WHERE discord_id = ? AND link_status = 'approved'").get(app.discord_id);
+        if (app && !linked) {
+          const r = await runRoleJobs(db, cfg, [{ discordId: app.discord_id, tierKey: "None", reason: "solicitud rechazada" }], fetchImpl, log);
+          out.discordRole = r[0]?.ok ? "removed" : "error";
+        }
+      }
+      return out;
+    },
     "POST /api/mod/link": async (req) => { checkOrigin(req); const a = staffActor(req); const b = await readJson(req, 2048); return run(() => C.reviewLink(db, a, b)); },
-    "POST /api/mod/evidence": async (req) => { checkOrigin(req); const a = staffActor(req); const b = await readJson(req, 2048); return run(() => C.reviewEvidence(db, a, b)); },
+    "POST /api/mod/evidence": async (req) => {
+      checkOrigin(req); const a = staffActor(req); const b = await readJson(req, 2048);
+      const out = run(() => C.reviewEvidence(db, a, b));
+      // Las vistas nuevas pueden subir el rango al momento.
+      try {
+        const ev = evaluateCreators(db, cfg);
+        if (ev.changes.length) { clearPublicCache(); out.rankChanges = ev.changes.length; }
+        runRoleJobs(db, cfg, ev.roleJobs, fetchImpl, log);
+      } catch (e) { log.error("[creadores]", e); }
+      return out;
+    },
     "POST /api/mod/evidence/probe": async (req) => {
       checkOrigin(req); const a = staffActor(req);
       const b = await readJson(req, 256);

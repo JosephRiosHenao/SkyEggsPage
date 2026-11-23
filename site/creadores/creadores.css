@@ -245,3 +245,27 @@
 .pickrow:hover, .pickrow:focus-visible { background: #FFF4CC; }
 .pickrow img { width: 44px; height: 44px; border-radius: 10px; background: #DCE6F7; }
 .mt { margin-top: 1.1rem; }
+
+/* ---------- Panel: creadores y métricas (staff) ---------- */
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: .7rem; margin: 1rem 0; }
+.tile { display: flex; flex-direction: column; gap: .1rem; padding: .8rem 1rem; border-radius: 16px; background: #F3F7FF; border: 2px solid #D8E3FA; }
+.tile strong { font: 400 1.6rem/1.1 var(--display); color: var(--tinta); }
+.tile span { font-size: .85rem; color: var(--tinta-suave); }
+.tile--warn { background: #FFF4DB; border-color: #F5C96B; }
+.tiers { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1rem; }
+.tierchip { --tier: var(--cielo); padding: .15rem .7rem; border-radius: 999px; border: 2px solid var(--tier); font-weight: 800; font-size: .9rem; color: var(--tinta); background: #fff; }
+.split { display: grid; grid-template-columns: 1.4fr 1fr; gap: 1.5rem; align-items: start; }
+@media (max-width: 760px) { .split { grid-template-columns: 1fr; } }
+.bars { margin: 0; }
+.bars__row { display: flex; align-items: flex-end; gap: 6px; height: 180px; margin-top: .6rem; padding-bottom: 1.4rem; border-bottom: 1px solid #D8E3FA; }
+.bars__col { position: relative; flex: 1; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; }
+.bars__bar { width: 100%; max-width: 46px; min-height: 2px; height: 2px; background: var(--cielo); border-radius: 4px 4px 0 0; transition: height .4s ease; }
+.bars__col:hover .bars__bar { background: var(--tinta-suave); }
+.bars__val { font-size: .72rem; font-weight: 800; color: var(--tinta-suave); white-space: nowrap; }
+.bars__lbl { position: absolute; bottom: -1.3rem; font-size: .72rem; color: var(--tinta-suave); white-space: nowrap; }
+@media (prefers-reduced-motion: reduce) { .bars__bar { transition: none; } }
+.tbl--creators td { vertical-align: top; }
+.tbl--creators tr.is-risk td { background: #FFF8E6; }
+.detail { margin-top: 1rem; border: 3px solid var(--cielo); }
+.detail h3 { margin-top: 1rem; }
+.panel .form-actions input[type="search"] { flex: 1 1 260px; min-width: 0; }

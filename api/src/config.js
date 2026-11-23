@@ -37,6 +37,16 @@ export const config = {
     guildId: process.env.DISCORD_GUILD_ID || "",
     redirectUri: process.env.DISCORD_REDIRECT_URI || "",
     webhookUrl: process.env.DISCORD_WEBHOOK_URL || "",
+    // Opcional: token del bot de la app de Discord (Bot → Reset Token). Con él la página pone y quita
+    // los roles de creador sola. Sin él, los moderadores siguen dándolos a mano.
+    botToken: process.env.DISCORD_BOT_TOKEN || "",
+    // Roles de cada rango (opcionales). El rango base usa DISCORD_ROLE_CREATOR.
+    levelRoles: {
+      Active: process.env.DISCORD_ROLE_CREATOR_ACTIVE || "",
+      Viral: process.env.DISCORD_ROLE_CREATOR_VIRAL || "",
+      Star: process.env.DISCORD_ROLE_CREATOR_STAR || "",
+      Elite: process.env.DISCORD_ROLE_CREATOR_ELITE || "",
+    },
     roles: {
       admin: process.env.DISCORD_ROLE_ADMIN || "1560889139375898775",
       moderator: process.env.DISCORD_ROLE_MODERATOR || "1563742282392543312",
@@ -57,6 +67,16 @@ export const config = {
     // Días después de cerrar la semana / el mes para reclamar su pack.
     claimGraceDaysWeek: int("CLAIM_GRACE_DAYS_WEEK", 3),
     claimGraceDaysMonth: int("CLAIM_GRACE_DAYS_MONTH", 5),
+    // Rangos automáticos: si en una semana no sube ningún video baja a Creator. El aviso llega
+    // WARN_DAYS_BEFORE días antes del fin de la semana y la bajada se aplica DEMOTION_GRACE_HOURS
+    // después de que termina (margen para subir la evidencia de un video del domingo).
+    autoTiers: process.env.CREATOR_AUTO_TIERS !== "false",
+    warnDaysBefore: int("CREATOR_WARN_DAYS_BEFORE", 3),
+    demotionGraceHours: int("CREATOR_DEMOTION_GRACE_HOURS", 24),
+    // Creadores antiguos (ya tenían el tag en el juego sin pasar por la página): días para aplicar
+    // desde el aviso, y fecha límite final (hora de Colombia) tras la cual se les quita el rol.
+    legacyNoticeDays: int("LEGACY_NOTICE_DAYS", 3),
+    legacyDeadline: Date.parse(`${process.env.LEGACY_DEADLINE || "2027-01-01"}T00:00:00-05:00`),
   },
 };
 if (!config.discord.redirectUri) config.discord.redirectUri = `${config.siteUrl}/api/auth/discord/callback`;
