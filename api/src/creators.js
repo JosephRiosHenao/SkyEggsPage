@@ -4,6 +4,7 @@ import { randomBytes } from "node:crypto";
 import { tx } from "./db.js";
 import { PACK_BY_KEY, bestPack, robuxFor, SPECIAL } from "./program.js";
 import { trackableSite } from "./views.js";
+import { queueTierSet, queueNotice, tierOf } from "./lifecycle.js";
 
 // ---------- Fechas (mismo reloj que el juego: lunes 00:00 UTC-5) ----------
 const OFFSET_S = -5 * 3600;
@@ -264,7 +265,25 @@ export function creatorState(db, cfg, discordId, now = Date.now()) {
     bonuses: db.prepare("SELECT id, evidence_id AS evidenceId, views, robux, status, created_at AS createdAt, note FROM bonuses WHERE discord_id = ? ORDER BY id DESC LIMIT 30").all(String(discordId)),
     specials: specials.map((s) => ({ id: s.id, month: s.month, views: s.views, request: s.request, status: s.status, note: s.review_note })),
     specialAvailable: specialMonth ? { month: specialMonth.key, views: specialMonth.views } : null,
+    // Rango automático: el actual, las vistas de la semana y si esta semana ya hay video.
+    rank: link && link.link_status === "approved" ? {
+      tier: tierOf(link),
+      changedAt: link.tier_changed_at,
+      weekViews: Math.max(0, db.prepare("SELECT COALESCE(SUM(views),0) AS v FROM evidences WHERE discord_id = ? AND status = 'approved' AND week = ?").get(String(discordId), w).v),
+      weekVideos: db.prepare("SELECT COUNT(*) AS n FROM evidences WHERE discord_id = ? AND status != 'rejected' AND week = ?").get(String(discordId), w).n,
+      weekEndsAt: weekStartMs(w + 1),
+      warned: link.warn_week === w,
+    } : null,
+    publicProfile: link ? link.public_profile !== 0 : true,
+    notices: link?.roblox_user_id ? db.prepare("SELECT kind, param, created_at AS createdAt FROM notices WHERE roblox_user_id = ? ORDER BY id DESC LIMIT 15").all(link.roblox_user_id) : [],
   };
+}
+
+export function setPublicProfile(db, discordId, on) {
+  const c = getCreator(db, discordId);
+  if (!c || c.link_status !== "approved") throw new Fail("link_required");
+  db.prepare("UPDATE creators SET public_profile = ? WHERE discord_id = ?").run(on ? 1 : 0, c.discord_id);
+  return { ok: true, publicProfile: !!on };
 }
 
 export function claimPack(db, cfg, discordId, body, now = Date.now()) {
@@ -366,7 +385,11 @@ export function reviewApplication(db, actor, body, now = Date.now()) {
   });
 }
 
-function approveLink(db, actor, discordId, userId, name, display, now) {
+// Confirma la cuenta de Roblox. Si es nuevo en el programa (solicitud aprobada) entra en el rango
+// más bajo (Creator) en el juego y en la página, con un correo de bienvenida al buzón.
+// Si ya tenía rango (p. ej. se vuelve a confirmar su cuenta), lo conserva.
+function approveLink(db, actor, discordId, userId, name, display, now, isNew = true) {
+  const prev = getCreator(db, discordId);
   db.prepare(`
     INSERT INTO creators (discord_id, roblox_user_id, roblox_name, roblox_display, link_status, link_requested_at, link_reviewed_by, link_reviewed_at)
     VALUES (?, ?, ?, ?, 'approved', ?, ?, ?)
@@ -374,9 +397,13 @@ function approveLink(db, actor, discordId, userId, name, display, now) {
       roblox_display = excluded.roblox_display, link_status = 'approved', link_code = NULL,
       link_reviewed_by = excluded.link_reviewed_by, link_reviewed_at = excluded.link_reviewed_at, link_note = NULL
   `).run(String(discordId), userId, name, display, now, actor.name, now);
-  // El juego le da el nivel base "Creator" si aún no tiene ninguno.
-  db.prepare("INSERT INTO rewards (id, user_id, tier, source, day, created_at, kind, pack) VALUES (?, ?, 'creator', 'creator', ?, ?, 'tier', 'Creator')")
-    .run(randomBytes(12).toString("hex"), userId, todayStr(now), now);
+  const keepTier = !isNew && prev?.tier && prev.tier !== "None";
+  const tier = keepTier ? tierOf(prev) : "Creator";
+  db.prepare("UPDATE creators SET tier = ?, tier_changed_at = ?, warn_week = NULL WHERE discord_id = ?").run(tier, now, String(discordId));
+  queueTierSet(db, userId, tier, now);
+  if (isNew) queueNotice(db, { robloxUserId: userId, discordId: String(discordId), kind: "welcome", param: "Creator", actor: actor.name }, now);
+  // Si era un creador antiguo, queda aprobado.
+  db.prepare("UPDATE legacy_creators SET status = 'approved', updated_at = ? WHERE roblox_user_id = ?").run(now, userId);
 }
 
 export function reviewLink(db, actor, body, now = Date.now()) {
@@ -389,7 +416,9 @@ export function reviewLink(db, actor, body, now = Date.now()) {
     if (action === "approve") {
       const taken = db.prepare("SELECT 1 FROM creators WHERE roblox_user_id = ? AND link_status = 'approved' AND discord_id != ?").get(c.roblox_user_id, c.discord_id);
       if (taken) throw new Fail("roblox_taken");
-      approveLink(db, actor, c.discord_id, c.roblox_user_id, c.roblox_name, c.roblox_display, now);
+      const before = db.prepare("SELECT tier, link_reviewed_at FROM creators WHERE discord_id = ?").get(c.discord_id);
+      // Ya era creador (tenía rango) → cambio de cuenta; si no, entra nuevo.
+      approveLink(db, actor, c.discord_id, c.roblox_user_id, c.roblox_name, c.roblox_display, now, !(before?.tier && before.tier !== "None"));
       db.prepare("UPDATE creators SET link_note = ? WHERE discord_id = ?").run(note(body), c.discord_id);
     } else {
       db.prepare("UPDATE creators SET link_status = 'rejected', link_reviewed_by = ?, link_reviewed_at = ?, link_note = ? WHERE discord_id = ?")

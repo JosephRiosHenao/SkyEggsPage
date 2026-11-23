@@ -80,3 +80,58 @@ export function notifyMods(cfg, text, fetchImpl = fetch) {
     body: JSON.stringify({ content: String(text).slice(0, 1900), allowed_mentions: { parse: [] } }),
   }).catch(() => {});
 }
+
+// ---------- Roles automáticos con el bot de la app ----------
+// Sin librerías: la API REST de Discord basta para poner y quitar roles.
+//   PUT    /guilds/{guild}/members/{user}/roles/{role}
+//   DELETE /guilds/{guild}/members/{user}/roles/{role}
+// Requisitos: el bot está en el servidor con el permiso "Gestionar roles" y su rol está
+// POR ENCIMA de los roles de creador en la lista de roles del servidor (si no, Discord responde 403).
+export function botEnabled(cfg) {
+  return Boolean(cfg.discord.botToken && cfg.discord.guildId);
+}
+
+// Roles de Discord que corresponden a un rango (null = sin rango: se quitan todos).
+export function rolesForTier(cfg, tierKey) {
+  const base = cfg.discord.roles.creator;
+  const levels = cfg.discord.levelRoles || {};
+  const add = [];
+  const remove = [];
+  if (tierKey && tierKey !== "None") add.push(base); else remove.push(base);
+  for (const [key, role] of Object.entries(levels)) {
+    if (!role || role === base) continue;
+    if (key === tierKey) add.push(role); else remove.push(role);
+  }
+  return { add, remove };
+}
+
+// Aplica los cambios. Devuelve { ok, done: [...], errors: [...] }. Nunca lanza.
+export async function setMemberRoles(cfg, discordId, { add = [], remove = [] }, reason = "Programa de creadores", fetchImpl = fetch) {
+  if (!botEnabled(cfg)) return { ok: false, skipped: true, done: [], errors: ["bot_off"] };
+  if (!/^\d{5,25}$/.test(String(discordId))) return { ok: false, done: [], errors: ["bad_user"] };
+  const done = [];
+  const errors = [];
+  const headers = {
+    authorization: `Bot ${cfg.discord.botToken}`,
+    "x-audit-log-reason": encodeURIComponent(String(reason).slice(0, 200)),
+  };
+  const run = async (method, role) => {
+    if (!/^\d{5,25}$/.test(String(role))) return;
+    const url = `${API}/guilds/${cfg.discord.guildId}/members/${discordId}/roles/${role}`;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const r = await call(fetchImpl, url, { method, headers });
+        if (r.ok || r.status === 204) { done.push(`${method === "PUT" ? "+" : "-"}${role}`); return; }
+        if (r.status === 429 && attempt === 0) {
+          await new Promise((res) => setTimeout(res, Math.min(5000, Math.ceil((r.body?.retry_after || 1) * 1000))));
+          continue;
+        }
+        errors.push(`${method} ${role}: ${r.status}`);
+        return;
+      } catch (e) { errors.push(`${method} ${role}: ${e.message}`); return; }
+    }
+  };
+  for (const role of add) await run("PUT", role);
+  for (const role of remove) await run("DELETE", role);
+  return { ok: errors.length === 0, done, errors };
+}

@@ -420,3 +420,45 @@ ol, ul { padding: 0; list-style: none; }
     letter-spacing: .01em;
   }
 }
+
+/* ---------- Carrusel "Nuestros creadores" (js/creators.js) ---------- */
+.cc { padding: 4.5rem 0; background: linear-gradient(180deg, var(--cielo-claro), #fff); }
+.cc[hidden] { display: none; }
+.cc__head { display: flex; align-items: end; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.cc__count { display: inline-block; margin-left: .3rem; padding: 0 .6rem; border-radius: 999px; background: var(--yema); color: var(--tinta); font-weight: 800; font-size: var(--t-sm); }
+.cc__arrows { display: flex; gap: .6rem; }
+.cc__arrows button {
+  width: 48px; height: 48px; border-radius: 50%; border: 3px solid var(--tinta); background: var(--blanco);
+  box-shadow: 0 4px 0 var(--tinta); font: 400 1.8rem/1 var(--display); color: var(--tinta); cursor: pointer;
+}
+.cc__arrows button:disabled { opacity: .35; cursor: default; }
+.cc__arrows button:not(:disabled):active { translate: 0 3px; box-shadow: 0 1px 0 var(--tinta); }
+.cc__track {
+  display: grid; grid-auto-flow: column; grid-auto-columns: minmax(230px, 260px); gap: 1rem;
+  margin-top: 1.6rem; padding: .4rem .2rem 1.2rem; overflow-x: auto; scroll-snap-type: x mandatory;
+  scrollbar-width: thin; overscroll-behavior-x: contain;
+}
+.cc__track:focus-visible { outline: 3px solid var(--cielo); outline-offset: 4px; border-radius: 16px; }
+.cc__card {
+  scroll-snap-align: start; display: flex; flex-direction: column; align-items: center; text-align: center;
+  padding: 1.2rem 1rem 1rem; background: var(--blanco); border: 3px solid var(--tinta); border-radius: 24px;
+  box-shadow: 0 6px 0 var(--tinta);
+}
+.cc__pic { width: 96px; height: 96px; border-radius: 50%; background: var(--cielo-claro); border: 3px solid var(--tinta); object-fit: cover; }
+.cc__tier {
+  --tier: var(--cielo); margin-top: -.8rem; padding: .1rem .7rem; border-radius: 999px;
+  background: var(--tier); color: var(--tinta); border: 2px solid var(--tinta); font-weight: 800; font-size: .85rem; white-space: nowrap;
+}
+.cc__name { margin-top: .5rem; font: 400 1.3rem/1.15 var(--display); color: var(--tinta); overflow-wrap: anywhere; }
+.cc__user { font-size: var(--t-sm); color: var(--tinta-suave); overflow-wrap: anywhere; }
+.cc__nets { list-style: none; display: flex; flex-wrap: wrap; justify-content: center; gap: .4rem; margin: .8rem 0 .6rem; padding: 0; }
+.cc__net {
+  display: inline-flex; align-items: center; gap: .3rem; padding: .2rem .6rem; border-radius: 999px;
+  background: var(--cielo-claro); color: var(--tinta); font-weight: 700; font-size: .85rem; text-decoration: none;
+}
+.cc__net:hover, .cc__net:focus-visible { background: var(--yema); }
+.cc__icon { font-size: .8rem; }
+.cc__fol { padding-left: .3rem; border-left: 1px solid rgba(26, 39, 102, .25); font-weight: 800; }
+.cc__roblox { margin-top: auto; font-weight: 800; font-size: var(--t-sm); color: var(--tinta-suave); }
+.cc__cta { margin-top: .6rem; font-weight: 800; }
+.cc__cta a { color: var(--tinta); }

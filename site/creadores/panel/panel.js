@@ -52,6 +52,8 @@
     not_trackable: "Esta red no deja leer las vistas solas. Escribe las vistas fijas.",
     no_auto_views: "Todavía no se pudieron leer las vistas. Toca “Volver a leer” o escribe las vistas fijas.",
     views_off: "La lectura automática de vistas está apagada en el servidor.",
+    bad_tier: "Ese rango no existe.",
+    same_tier: "Ya tiene ese rango.",
   };
   const LOGIN_ERRORS = {
     discord_off: "El login con Discord todavía no está configurado. Avísale al admin.",
@@ -192,7 +194,19 @@
       }
       if (isMod()) add(true, roles().admin ? "Eres el admin" : "Eres moderador", "Revisa la pestaña Moderación y la Guía para moderadores.", "moderacion");
       box.append(steps);
-      s.replaceChildren(box);
+      const extra = [];
+      if (isCreator() && creator?.link?.status === "approved") {
+        const toggle = el("input", { type: "checkbox", checked: creator.publicProfile });
+        toggle.addEventListener("change", () => act(toggle, () => api("/api/creators/public-profile", { on: toggle.checked }),
+          (o) => (o.publicProfile ? "Tu perfil se muestra en la página de inicio." : "Tu perfil ya no se muestra en la página."), async () => { creator = null; }));
+        extra.push(el("div", { class: "box" }, el("h2", {}, "Tu perfil en la página"),
+          el("p", { class: "muted" }, "En la portada de skyeggs.pro hay un carrusel con los creadores del programa: tu nombre de Roblox, tu foto, tu nivel y las redes que pusiste al aplicar."),
+          el("label", { class: "check" }, toggle, "Mostrar mi perfil en el carrusel")));
+        if (creator.notices?.length) extra.push(el("div", { class: "box" }, el("h2", {}, "Avisos que te enviamos al buzón"),
+          el("ul", { class: "list" }, ...creator.notices.map((x) => el("li", { class: "item" },
+            el("div", { class: "item__head" }, el("span", { class: "item__title" }, noticeText(x.kind, x.param)), el("span", { class: "small muted" }, when(x.createdAt))))))));
+      }
+      s.replaceChildren(box, ...extra);
     },
 
     async aplicar(s) {
@@ -282,11 +296,12 @@
         box(`Este mes (${creator.month.current.label})`, "month", monthly, creator.month.current, "current"));
       if (creator.month.previous.open && !creator.month.previous.claim && creator.month.previous.views > 0) mo.append(box(`Mes pasado (${creator.month.previous.label})`, "month", monthly, creator.month.previous, "previous"));
       const warn = creator.link.status !== "approved" ? el("div", { class: "notice" }, "Para reclamar necesitas tu cuenta de Roblox vinculada y aprobada (pestaña Mi Roblox).") : null;
+      const rankBox = creator.rank ? rankCard(creator.rank) : null;
       const hist = el("div", { class: "box" }, el("h2", {}, "Lo que ya reclamaste"),
         creator.claims.length ? el("table", { class: "tbl" }, el("thead", {}, el("tr", {}, el("th", {}, "Periodo"), el("th", {}, "Pack"), el("th", {}, "Vistas"), el("th", {}, "Fecha"))),
           el("tbody", {}, ...creator.claims.map((c) => el("tr", {}, el("td", {}, c.type === "week" ? `Semana ${c.key}` : `Mes ${c.key}`), el("td", {}, c.pack), el("td", {}, n(c.views)), el("td", {}, when(c.createdAt))))))
           : el("p", { class: "empty" }, "Todavía nada. ¡Sube tu primer video!"));
-      s.replaceChildren(...[warn, wk, mo, hist].filter(Boolean));
+      s.replaceChildren(...[warn, rankBox, wk, mo, hist].filter(Boolean));
       // anchos por propiedades CSSOM (la CSP no permite style en línea)
       for (const f of s.querySelectorAll(".track__fill")) f.style.width = `${f.dataset.w}%`;
       for (const m of s.querySelectorAll(".track__mark")) m.style.left = `calc(${m.dataset.l}% - 2px)`;
@@ -413,7 +428,9 @@
         ["evidencias", `Evidencias (${queue.evidences.length})`, () => modEvidences(body)],
         ["bonos", `Bonos Robux (${queue.bonuses.length})`, () => modBonuses(body, admin)],
         ...(admin ? [["especiales", `Pedidos especiales (${queue.specials.length})`, () => modSpecials(body)]] : []),
-        ["creadores", "Creadores", () => modCreators(body)],
+        ["creadores", "Creadores y métricas", () => modCreators(body)],
+        ["avisos", "Avisos", () => modNotices(body)],
+        ["antiguos", "Creadores antiguos", () => modLegacy(body)],
         ["registro", "Registro", () => modAudit(body)],
       ];
       let active = sessionStorage.getItem("se_modtab") || "solicitudes";
@@ -495,7 +512,7 @@
         a.review_note ? el("p", { class: "item__meta" }, `Nota (${a.reviewed_by}): ${a.review_note}`) : null,
         el("div", { class: "item__actions" }, note,
           a.status === "pending" ? btn("Contactado", "btn--white", (b) => act(b, () => api("/api/mod/application", { id: a.id, action: "contacted", note: note.value }), "Marcada como contactada.", refreshMod)) : null,
-          btn("Aprobar (y confirmar su Roblox)", "btn--green", (b) => act(b, () => api("/api/mod/application", { id: a.id, action: "approve", note: note.value }), (o) => `Aprobada${o.linked ? " y cuenta de Roblox vinculada" : ""}. Dale el rol de Content Creator en Discord.`, refreshMod)),
+          btn("Aprobar (y confirmar su Roblox)", "btn--green", (b) => act(b, () => api("/api/mod/application", { id: a.id, action: "approve", note: note.value }), (o) => `Aprobada${o.linked ? " y cuenta de Roblox vinculada" : ""}. ${o.discordRole === "ok" ? "El rol de Content Creator se puso solo en Discord." : o.discordRole === "error" ? "No se pudo poner el rol en Discord: dáselo a mano." : "Dale el rol de Content Creator en Discord."} El rango Creator y el correo de bienvenida llegan solos al juego.`, refreshMod)),
           btn("Rechazar", "btn--red", (b) => { if (!note.value.trim()) return flash("Escribe el motivo en la nota.", "bad"); act(b, () => api("/api/mod/application", { id: a.id, action: "reject", note: note.value }), "Rechazada.", refreshMod); })));
     });
     body.replaceChildren(...(items.length ? [el("div", { class: "list" }, ...items)] : [empty("No hay solicitudes pendientes.")]));
@@ -579,16 +596,180 @@
     body.replaceChildren(...(items.length ? [el("div", { class: "list" }, ...items)] : [empty("No hay pedidos especiales.")]));
   }
 
+  // ---------- Rangos, avisos y panel de creadores ----------
+  const LEVEL_ORDER = ["Creator", "Active", "Viral", "Star", "Elite"];
+  const levelOf = (key) => program.levels.find((l) => l.key === key);
+  const levelName = (key) => (key === "None" ? "Sin rango" : levelOf(key)?.name || key || "—");
+  const NOTICE_TEXT = {
+    welcome: () => "🎬 Bienvenida al programa (rango Creator)",
+    promoted: (p) => `⬆️ Subió a ${levelName(p)}`,
+    demotion_warning: (p) => `⚠️ Aviso: sin video esta semana, puede bajar de ${levelName(p)}`,
+    demoted: (p) => `⬇️ Bajó de ${levelName(p)} a Creator (semana sin videos)`,
+    legacy_join: (p) => `📨 Creador antiguo: aplicar antes del ${p}`,
+    legacy_removed: (p) => (p === "rejected" ? "❌ Rango quitado: solicitud rechazada" : "❌ Rango quitado: no aplicó a tiempo"),
+    removed: () => "❌ Sacado del programa",
+    tier_set: (p) => `✏️ Rango cambiado a ${levelName(p)}`,
+  };
+  const noticeText = (kind, param) => (NOTICE_TEXT[kind] ? NOTICE_TEXT[kind](param) : kind);
+  const DELIVERY = { pending: ["pending", "Espera a que entre al juego"], delivered: ["approved", "En su buzón"], cancelled: ["rejected", "Cancelado"] };
+
+  function rankCard(r) {
+    const idx = LEVEL_ORDER.indexOf(r.tier);
+    const next = program.levels[idx + 1];
+    const lv = levelOf(r.tier);
+    const box = el("div", { class: "box" }, el("h2", {}, `Tu nivel: ${lv ? `${lv.emoji} ${lv.name}` : "—"}`));
+    if (next) {
+      const pct = Math.min(100, (r.weekViews / next.minWeekViews) * 100);
+      box.append(el("p", {}, `Esta semana llevas ${n(r.weekViews)} vistas aprobadas. Con ${n(next.minWeekViews)} subes a ${next.emoji} ${next.name} (te faltan ${n(Math.max(0, next.minWeekViews - r.weekViews))}).`),
+        el("div", { class: "track", role: "img", "aria-label": `${n(r.weekViews)} de ${n(next.minWeekViews)} vistas` }, el("div", { class: "track__fill", "data-w": pct })));
+    } else box.append(el("p", {}, "¡Estás en el nivel más alto! Mantén al menos un video por semana."));
+    if (idx > 0) {
+      box.append(r.weekVideos > 0
+        ? el("p", { class: "small muted" }, `✅ Ya subiste ${r.weekVideos} ${r.weekVideos === 1 ? "video" : "videos"} esta semana: conservas tu nivel.`)
+        : el("div", { class: "notice notice--bad" }, `Aún no subes ningún video esta semana. Si llega el domingo ${day(r.weekEndsAt - 1)} sin video, vuelves a Creator.`));
+    }
+    box.append(el("p", { class: "small muted" }, "Los niveles suben solos con las vistas de la semana (lunes a domingo). El juego y Discord se actualizan solos y te llega un correo al buzón."));
+    return box;
+  }
+
+  // Barras simples (una serie): vistas aprobadas por semana. Tooltip nativo + tabla accesible.
+  function weekBars(weeks, label = "Vistas aprobadas por semana") {
+    const max = Math.max(1, ...weeks.map((w) => w.views));
+    const fig = el("figure", { class: "bars" }, el("figcaption", { class: "small muted" }, label));
+    const row = el("div", { class: "bars__row", role: "img", "aria-label": weeks.map((w) => `${w.label}: ${n(w.views)}`).join("; ") });
+    for (const w of weeks) {
+      const bar = el("div", { class: "bars__bar", "data-h": Math.max(2, (w.views / max) * 100), title: `${w.label}: ${n(w.views)} vistas · ${w.videos} videos` });
+      row.append(el("div", { class: "bars__col" }, el("span", { class: "bars__val" }, w.views ? n(w.views) : ""), bar, el("span", { class: "bars__lbl" }, w.label.split(" – ")[0])));
+    }
+    fig.append(row);
+    requestAnimationFrame(() => { for (const b of row.querySelectorAll(".bars__bar")) b.style.height = `${b.dataset.h}%`; });
+    return fig;
+  }
+  const tile = (value, label, kind) => el("div", { class: `tile${kind ? ` tile--${kind}` : ""}` }, el("strong", {}, value), el("span", {}, label));
+
   async function modCreators(body) {
-    const { creators } = await api("/api/mod/creators");
+    const d = await api("/api/mod/creators");
+    const s = d.summary;
+    const tiles = el("div", { class: "tiles" },
+      tile(String(s.creators), "creadores activos"),
+      tile(n(s.weekViews), `vistas esta semana (${d.week.label})`),
+      tile(n(s.monthViews), `vistas en ${d.month}`),
+      tile(String(s.weekVideos), "videos esta semana"),
+      tile(String(s.atRisk), "en riesgo de bajar", s.atRisk ? "warn" : null),
+      tile(String(s.pendingEvidences), "evidencias por revisar"),
+      tile(`${n(s.robuxPaid)} R$`, "bonos pagados"),
+      tile(d.bot ? "Automático" : "A mano", "roles de Discord", d.bot ? null : "warn"));
+    const tiers = el("div", { class: "tiers" }, ...LEVEL_ORDER.map((k) => {
+      const lv = levelOf(k);
+      const chip = el("span", { class: "tierchip" }, `${lv.emoji} ${lv.name}: ${s.byTier[k] || 0}`);
+      chip.style.setProperty("--tier", lv.color);
+      return chip;
+    }));
+    const plat = d.platforms.length ? el("table", { class: "tbl" }, el("thead", {}, el("tr", {}, el("th", {}, "Red"), el("th", {}, "Videos (mes)"), el("th", {}, "Vistas (mes)"))),
+      el("tbody", {}, ...d.platforms.map((p) => el("tr", {}, el("td", {}, p.platform), el("td", {}, String(p.videos)), el("td", {}, n(p.views)))))) : empty("Aún no hay videos aprobados este mes.");
+
+    const filter = el("input", { class: "wide", placeholder: "Buscar por Discord, Roblox o red…", type: "search" });
+    const tierFilter = el("select", {}, el("option", { value: "" }, "Todos los rangos"), ...LEVEL_ORDER.map((k) => el("option", { value: k }, levelName(k))), el("option", { value: "risk" }, "En riesgo"), el("option", { value: "other" }, "Sin aprobar / fuera"));
+    const tableBox = el("div", { class: "scrollx" });
+    const detailBox = el("div");
     const label = { approved: "Vinculado", pending: "En revisión", rejected: "Rechazado", none: "Sin vincular" };
-    body.replaceChildren(creators.length ? el("div", { class: "scrollx" }, el("table", { class: "tbl" },
-      el("thead", {}, el("tr", {}, ...["Creador", "Roblox", "Semana", "Mes", "Videos (mes)", "Último pack"].map((h) => el("th", {}, h)))),
-      el("tbody", {}, ...creators.map((c) => el("tr", {},
-        el("td", {}, c.global_name ? `${c.global_name} (@${c.username})` : `@${c.username}`),
-        el("td", {}, c.roblox_name ? `@${c.roblox_name} · ${label[c.link_status] || ""}` : label.none),
-        el("td", {}, n(c.week_views)), el("td", {}, n(c.month_views)), el("td", {}, String(c.month_videos)), el("td", {}, c.last_pack || "—"))))))
-      : empty("Todavía no hay creadores."));
+    const paint = () => {
+      const q = filter.value.trim().toLowerCase();
+      const tf = tierFilter.value;
+      const rows = d.creators.filter((c) => {
+        if (tf === "risk" && !c.atRisk) return false;
+        if (tf === "other" && c.linkStatus === "approved" && c.tier !== "None") return false;
+        if (tf && tf !== "risk" && tf !== "other" && c.tier !== tf) return false;
+        if (!q) return true;
+        return [c.discord, c.roblox?.name, c.roblox?.displayName, ...c.platforms.map((p) => `${p.type} ${p.url}`)].join(" ").toLowerCase().includes(q);
+      });
+      tableBox.replaceChildren(rows.length ? el("table", { class: "tbl tbl--creators" },
+        el("thead", {}, el("tr", {}, ...["Creador", "Roblox", "Rango", "Redes", "Semana", "Sem. pasada", "Mes", "Total", "Último video", "Estado", ""].map((h) => el("th", {}, h)))),
+        el("tbody", {}, ...rows.map((c) => {
+          const lv = c.tier && levelOf(c.tier);
+          const mismatch = c.tier && c.gameTier && c.gameTier !== c.tier;
+          return el("tr", { class: c.atRisk ? "is-risk" : null },
+            el("td", {}, c.discord),
+            el("td", {}, c.roblox ? link(`https://www.roblox.com/users/${c.roblox.userId}/profile`, `@${c.roblox.name}`) : "—", c.roblox ? el("div", { class: "small muted" }, `${label[c.linkStatus] || c.linkStatus}${c.level != null ? ` · nivel ${c.level}` : ""}${c.lastSeen ? ` · jugó ${ago(c.lastSeen)}` : ""}`) : null),
+            el("td", {}, lv ? `${lv.emoji} ${lv.name}` : levelName(c.tier), mismatch ? el("div", { class: "small muted" }, `En el juego: ${levelName(c.gameTier)}`) : null,
+              c.next ? el("div", { class: "small muted" }, `Faltan ${n(c.next.missing)} para ${c.next.name}`) : null),
+            el("td", {}, ...(c.platforms.length ? c.platforms.map((p) => el("div", {}, link(p.url, p.type), p.followers ? ` · ${n(p.followers)}` : "")) : ["—"])),
+            el("td", {}, n(c.weekViews), el("div", { class: "small muted" }, `${c.weekVideos} videos`)),
+            el("td", {}, n(c.prevWeekViews)),
+            el("td", {}, n(c.monthViews), el("div", { class: "small muted" }, `${c.monthVideos} videos`)),
+            el("td", {}, n(c.totalViews), el("div", { class: "small muted" }, `${c.totalVideos} videos · ${n(c.robuxPaid)} R$`)),
+            el("td", {}, c.lastVideo || "—"),
+            el("td", {}, c.atRisk ? pill(c.warned ? "pending_mod" : "pending", c.warned ? "Avisado: sin video" : "Sin video esta semana") : c.linkStatus === "approved" && c.tier !== "None" ? pill("approved", "Al día") : pill("rejected", c.tier === "None" ? "Fuera" : label[c.linkStatus] || "—"),
+              c.pendingEvidences ? el("div", { class: "small muted" }, `${c.pendingEvidences} por revisar`) : null),
+            el("td", {}, btn("Ver", "btn--white", () => showCreator(detailBox, c))));
+        }))) : empty("Nadie coincide con el filtro."));
+    };
+    filter.addEventListener("input", paint);
+    tierFilter.addEventListener("change", paint);
+    paint();
+    body.replaceChildren(
+      el("p", { class: "small muted" }, `Los rangos suben solos con las vistas semanales (Activo ${n(3000)}, Viral ${n(3500)}, Estrella ${n(4500)}, Elite ${n(5000)}) y bajan a Creator tras una semana sin videos. Fecha límite de los creadores antiguos: ${new Date(s.legacyDeadline).toLocaleDateString("es-CO", { dateStyle: "long" })}.`),
+      tiles, tiers, el("div", { class: "split" }, el("div", {}, weekBars(d.weeks)), el("div", {}, el("h3", {}, "Redes este mes"), plat)),
+      el("h3", { class: "mt" }, "Todos los creadores"), el("div", { class: "form-actions" }, filter, tierFilter), tableBox, detailBox);
+  }
+
+  async function showCreator(box, c) {
+    box.replaceChildren(el("p", { class: "small muted" }, "Cargando…"));
+    const d = await api(`/api/mod/creator?discordId=${encodeURIComponent(c.discordId)}`).catch((e) => { flash(errText(e), "bad"); return null; });
+    if (!d) return box.replaceChildren();
+    const select = el("select", {}, ...LEVEL_ORDER.map((k) => el("option", { value: k, selected: k === c.tier }, levelName(k))), el("option", { value: "None", selected: c.tier === "None" }, "Sacar del programa (sin rango)"));
+    const card = el("div", { class: "box detail" },
+      el("div", { class: "item__head" }, el("h3", {}, `${c.discord}${c.roblox ? ` · @${c.roblox.name}` : ""}`), btn("Cerrar", "btn--white", () => box.replaceChildren())),
+      weekBars(d.history, "Sus vistas aprobadas por semana (las barras vacías son semanas sin vistas)"),
+      c.linkStatus === "approved" ? el("div", { class: "item__actions" }, el("span", {}, "Cambiar rango a mano: "), select,
+        btn("Guardar", "btn--yolk", (b) => {
+          if (select.value === c.tier) return flash("Ya tiene ese rango.", "bad");
+          if (select.value === "None" && !confirm("¿Sacarlo del programa? Pierde el rango en el juego y en Discord.")) return;
+          act(b, () => api("/api/mod/creator/tier", { discordId: c.discordId, tier: select.value }),
+            (o) => `Rango cambiado. ${o.discord === "ok" ? "Discord actualizado." : o.discord === "error" ? "No se pudo cambiar en Discord: hazlo a mano." : "Cambia el rol de Discord a mano."} El juego lo aplica cuando entre.`, () => modCreators(box.parentElement));
+        })) : null,
+      el("h3", {}, "Avisos al buzón"),
+      d.notices.length ? el("ul", { class: "list" }, ...d.notices.map((x) => el("li", { class: "item" },
+        el("div", { class: "item__head" }, el("span", { class: "item__title" }, noticeText(x.kind, x.param)), pill(...(DELIVERY[x.delivery] || ["pending", x.delivery || "—"]))),
+        el("p", { class: "item__meta" }, `${when(x.createdAt)} · ${x.actor || "Sistema"}${x.deliveredAt ? ` · entregado ${when(x.deliveredAt)}` : ""}`)))) : empty("Sin avisos todavía."),
+      el("h3", {}, "Evidencias"),
+      d.evidences.length ? el("table", { class: "tbl" }, el("thead", {}, el("tr", {}, ...["Fecha", "Red", "Video", "Estado", "Vistas"].map((h) => el("th", {}, h)))),
+        el("tbody", {}, ...d.evidences.map((e) => el("tr", {}, el("td", {}, e.publishedOn), el("td", {}, e.platform), el("td", {}, link(e.url, e.title || "abrir")), el("td", {}, { pending: "En revisión", approved: "Aprobada", rejected: "Rechazada" }[e.status] || e.status), el("td", {}, n(e.views))))))
+        : empty("No ha subido evidencias."));
+    box.replaceChildren(card);
+    card.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  async function modNotices(body) {
+    const { notices } = await api("/api/mod/notices?limit=300");
+    body.replaceChildren(el("p", { class: "small muted" }, "Todo lo que el sistema o un moderador le mandó a cada creador por el buzón del juego. “Espera a que entre al juego” = le llega la próxima vez que se conecte."),
+      notices.length ? el("div", { class: "scrollx" }, el("table", { class: "tbl" },
+        el("thead", {}, el("tr", {}, ...["Cuándo", "Jugador", "Aviso", "Quién", "Entrega"].map((h) => el("th", {}, h)))),
+        el("tbody", {}, ...notices.map((x) => el("tr", {},
+          el("td", {}, when(x.created_at)),
+          el("td", {}, x.roblox_name ? link(`https://www.roblox.com/users/${x.roblox_user_id}/profile`, `@${x.roblox_name}`) : `#${x.roblox_user_id}`, x.discord_username ? el("div", { class: "small muted" }, `Discord @${x.discord_username}`) : null),
+          el("td", {}, noticeText(x.kind, x.param)),
+          el("td", {}, x.actor || "Sistema"),
+          el("td", {}, pill(...(DELIVERY[x.delivery] || ["pending", x.delivery || "—"])), x.delivered_at ? el("div", { class: "small muted" }, when(x.delivered_at)) : null))))))
+        : empty("Todavía no se ha enviado ningún aviso."));
+  }
+
+  async function modLegacy(body) {
+    const { legacy, deadline, days } = await api("/api/mod/legacy");
+    const STATUS = { notified: ["pending", "Avisado"], applied: ["contacted", "Aplicó"], approved: ["approved", "Aprobado"], removed: ["rejected", "Rango quitado"] };
+    body.replaceChildren(
+      el("div", { class: "notice" }, `Jugadores que ya tenían el rango de creador en el juego sin pasar por esta página. Al entrar al juego reciben un aviso y tienen ${days} días para aplicar; si no, pierden el rango. Fecha límite para todos: ${new Date(deadline).toLocaleDateString("es-CO", { dateStyle: "long" })}. Quien aplicó a tiempo conserva el rango mientras revisan su solicitud (apruébala o recházala en “Solicitudes”).`),
+      legacy.length ? el("div", { class: "scrollx" }, el("table", { class: "tbl" },
+        el("thead", {}, el("tr", {}, ...["Jugador", "Nivel que tenía", "Estado", "Avisado", "Plazo", "Solicitud", "Última vez"].map((h) => el("th", {}, h)))),
+        el("tbody", {}, ...legacy.map((l) => el("tr", {},
+          el("td", {}, link(`https://www.roblox.com/users/${l.roblox_user_id}/profile`, `@${l.name}`)),
+          el("td", {}, levelName(LEVEL_ORDER[l.game_tier - 1])),
+          el("td", {}, pill(...(STATUS[l.status] || ["pending", l.status]))),
+          el("td", {}, when(l.notified_at)),
+          el("td", {}, l.status === "notified" ? `${when(l.deadline_at)} (${l.deadline_at > Date.now() ? `faltan ${Math.ceil((l.deadline_at - Date.now()) / 3_600_000)} h` : "vencido: se quita al entrar"})` : "—"),
+          el("td", {}, l.app_status || "sin solicitud"),
+          el("td", {}, l.last_seen ? ago(l.last_seen) : "—"))))))
+        : empty("Aún no ha entrado al juego ningún creador antiguo (se detectan al conectarse)."));
   }
 
   const ACTION_TEXT = {
@@ -598,6 +779,9 @@
     "bonus.approve": "aprobó un bono de", "bonus.reject": "rechazó un bono de", "bonus.paid": "pagó el bono de",
     "special.approve": "aprobó el pedido de", "special.reject": "rechazó el pedido de", "special.done": "cumplió el pedido de",
     claim: "reclamó un pack para", "codes.create": "generó códigos", "gift.send": "envió un regalo a", upload: "subió una captura",
+    "tier.promoted": "subió de rango a", "tier.demoted": "bajó de rango a", "tier.tier_set": "cambió el rango de", "tier.removed": "sacó del programa a",
+    "legacy.notified": "avisó al creador antiguo", "legacy.removed": "quitó el rango al creador antiguo",
+    "discord.roles": "actualizó los roles de Discord de", "discord.roles_error": "no pudo cambiar los roles de Discord de",
   };
   async function modAudit(body) {
     const { audit } = await api("/api/mod/audit?limit=200");

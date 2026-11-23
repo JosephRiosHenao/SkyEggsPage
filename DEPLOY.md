@@ -168,7 +168,7 @@ docker run --rm -v skyeggspage_skyeggs-data:/data -v "$PWD":/out alpine sh -c 'c
 
 ## 7. Programa de creadores (login con Discord)
 
-Página pública `https://skyeggs.pro/creadores/` y panel `https://skyeggs.pro/creadores/panel/`. Los roles salen del servidor de Discord de Sky Eggs: admin `1560889139375898775`, moderador `1563742282392543312`, creador `1561051688125730897`. La página no necesita bot: lee los roles con el permiso `guilds.members.read` del propio usuario al entrar.
+Página pública `https://skyeggs.pro/creadores/` y panel `https://skyeggs.pro/creadores/panel/`. Los roles salen del servidor de Discord de Sky Eggs: admin `1560889139375898775`, moderador `1563742282392543312`, creador `1561051688125730897`. Para leer los roles no hace falta bot (permiso `guilds.members.read` del propio usuario al entrar); el bot solo se usa, si lo configuras, para **poner y quitar** roles solo (ver abajo).
 
 ### Crear la aplicación de Discord (una vez)
 
@@ -188,9 +188,24 @@ docker compose up -d skyeggs-api
 
 Prueba: abre `https://skyeggs.pro/creadores/panel/`, entra con Discord y comprueba que salen tus insignias (Admin). Si dice "El login con Discord todavía no está configurado", falta alguna de las tres primeras variables.
 
+### Roles de Discord automáticos (opcional, con el bot)
+
+Sin librerías: la API usa la REST de Discord (`PUT/DELETE /guilds/{servidor}/members/{usuario}/roles/{rol}`).
+
+1. En la misma aplicación de Discord → **Bot** → **Reset Token** y copia el token (nunca lo pegues en un chat ni en el repo).
+2. **OAuth2 → URL Generator**: marca `bot` y el permiso **Manage Roles**; abre la URL e invita el bot al servidor de Sky Eggs.
+3. En Ajustes del servidor → **Roles**, arrastra el rol del bot **por encima** de Content Creator y de los roles de rango (si queda debajo, Discord responde 403).
+4. (Opcional) Crea un rol por rango (Activo, Viral, Estrella, Elite) y copia sus IDs.
+5. En `.env`: `DISCORD_BOT_TOKEN=…` y, si los creaste, `DISCORD_ROLE_CREATOR_ACTIVE/VIRAL/STAR/ELITE`. `docker compose up -d skyeggs-api`.
+
+Prueba: en Moderación → "Creadores y métricas" la tarjeta "roles de Discord" dice **Automático**. Cada cambio queda en el Registro ("actualizó los roles de Discord de…" o el error).
+
 ### Cómo funciona
 
-- **Aspirante** (sin rol): llena la solicitud. **Moderador**: la revisa, contacta, aprueba o rechaza. Al aprobar, el moderador le da el rol de Content Creator en Discord y `;SetCreator <usuario> Creator` en el juego.
+- **Aspirante** (sin rol): llena la solicitud. **Moderador**: la revisa, contacta, aprueba o rechaza. Al aprobar, el juego recibe solo el rango **Creator** (tag + permisos de HD Admin) y un correo de bienvenida; con el bot, también el rol de Discord.
+- **Rangos automáticos** (`api/src/lifecycle.js`, cada 15 min y al aprobar evidencias): Activo 3.000, Viral 3.500, Estrella 4.500 y Elite 5.000 vistas aprobadas en la semana. Si una semana entera no sube ningún video, vuelve a Creator (aviso al buzón 3 días antes; la bajada se aplica 24 h después del domingo). Los packs ya no suben el rango.
+- **Creadores antiguos**: el juego manda el nivel de creador de cada jugador en `/game/pull`. Si tiene rango pero no está aprobado en la página, recibe un aviso al buzón y tiene 3 días para aplicar (sin pasar del 1 de enero de 2027). Si no aplica, o lo rechazan, pierde el rango al entrar al juego. Pestaña "Creadores antiguos" en Moderación.
+- **Avisos al buzón**: kind `notice` (texto en `WebRewardServiceConfig.CreatorNotices` del juego) y cambios de rango kind `tierset`. Pestaña "Avisos" en Moderación.
 - **Creador**: su cuenta de Roblox se elige de la lista de jugadores que ya entraron a Sky Eggs (si no aparece, tiene que jugar primero) y el moderador la confirma al aprobar la solicitud, sube evidencias (enlace + captura opcional), ve sus metas y reclama **1 pack por semana** (hasta 3 días después del domingo) y **1 por mes** (hasta 5 días después). El juego entrega el pack al buzón con `CreatorService.SendReward` (mismo id `cr-<periodo>-<userId>`: no se duplica con `;CreatorReward`).
 - **Bono de Robux** (≥ 10.000 vistas, 100 R$ por cada 10.000, máx. 1.000 por video): moderador → admin (persona distinta) → el admin paga por el grupo y marca "Pagado".
 - **Pedido especial** (≥ 100.000 vistas aprobadas en el mes): solo el admin lo resuelve.

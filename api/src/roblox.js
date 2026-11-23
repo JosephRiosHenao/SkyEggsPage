@@ -57,7 +57,7 @@ async function robloxLookup(q, { fetchImpl, timeoutMs }) {
   return users;
 }
 
-async function avatars(ids, { fetchImpl, timeoutMs }) {
+export async function avatars(ids, { fetchImpl, timeoutMs }) {
   if (!ids.length) return new Map();
   const j = await getJson(
     fetchImpl,

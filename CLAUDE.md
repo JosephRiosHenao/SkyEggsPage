@@ -40,6 +40,7 @@ No tocar otros contenedores ni la configuración de un Traefik existente sin con
 
 - Tres actores con roles de Discord: admin (1 persona), moderadores y creadores; los aspirantes no tienen rol. API en `api/src/creators.js` (reglas), `discord.js` (OAuth) y `program.js` (niveles, packs, bono de Robux). Todo cambio de staff pasa por `audit()`.
 - Los packs de `program.js` tienen que coincidir con `CreatorServiceConfig.Packs` del juego. El texto de la página pública (`site/creadores/index.html`) también los repite: actualizar los tres a la vez.
+- Rangos automáticos, avisos al buzón y creadores antiguos: `api/src/lifecycle.js` (el texto de los avisos vive en el juego, `WebRewardServiceConfig.CreatorNotices`). Lista pública y panel de métricas del staff: `api/src/insights.js`; carrusel en `site/js/creators.js` (portada y /creadores/). Roles de Discord con bot opcional (`DISCORD_BOT_TOKEN`, `discord.js`).
 - Guía para cada actor: pestaña "Guía" del panel y `docs/GUIA-PROGRAMA-CREADORES.md`.
 
 ## Conexión con el juego

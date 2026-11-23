@@ -61,6 +61,24 @@
     </section>
 
     <!-- Cómo funciona -->
+    <!-- Creadores del programa (carrusel, /js/creators.js) -->
+    <section class="cc" data-creators hidden aria-labelledby="cc-title">
+      <div class="wrap">
+        <div class="cc__head">
+          <div>
+            <h2 class="section-title" id="cc-title">Nuestros creadores</h2>
+            <p class="section-lead">Ellos graban Sky Eggs. ¡Síguelos en sus redes! <span class="cc__count"><span data-creators-count></span> en el programa</span></p>
+          </div>
+          <div class="cc__arrows">
+            <button class="cc__prev" type="button" aria-label="Ver creadores anteriores">‹</button>
+            <button class="cc__next" type="button" aria-label="Ver más creadores">›</button>
+          </div>
+        </div>
+        <div class="cc__track" role="list" tabindex="0" aria-label="Creadores de contenido de Sky Eggs"></div>
+        <p class="cc__cta"><a href="/creadores/panel/#aplicar">¿Quieres aparecer aquí? Aplica al programa →</a></p>
+      </div>
+    </section>
+
     <section class="cr-steps" aria-labelledby="como-title">
       <div class="wrap">
         <h2 class="section-title" id="como-title">Cómo funciona</h2>
@@ -89,32 +107,32 @@
     <section class="cr-levels" id="niveles" aria-labelledby="niveles-title">
       <div class="wrap">
         <h2 class="section-title section-title--light" id="niveles-title">Cinco niveles, cada uno con más comandos</h2>
-        <p class="section-lead section-lead--light">Cada nivel trae los comandos de los anteriores. Subes al reclamar el pack que lo incluye.</p>
+        <p class="section-lead section-lead--light">Los niveles suben <strong>solos</strong> con las vistas aprobadas de la semana (lunes a domingo). Cada nivel trae los comandos de los anteriores. Si una semana entera no subes ningún video, vuelves a Creator (te avisamos por el buzón 3 días antes).</p>
         <ol class="ladder">
           <li class="rung rung--1">
             <div class="rung__badge"><span>🎬</span>Creator</div>
-            <p class="rung__req">Tu solicitud fue aprobada.</p>
-            <ul class="rung__cmds"><li><code>;Emotes</code> con el baile “Passinho do Jamal”</li><li><code>;Follow</code> y <code>;GoTo</code> a un jugador</li><li><code>;HideGuis</code> para grabar sin interfaz</li></ul>
+            <p class="rung__req">Tu solicitud fue aprobada: el rango llega solo al juego.</p>
+            <ul class="rung__cmds"><li><code>;Emotes</code> con el baile “Passinho do Jamal”</li><li><code>;Dance</code> pone a bailar a quien elijas</li><li><code>;Follow</code>, <code>;GoTo</code>, <code>;HideGuis</code>, <code>;Sparkles</code>, <code>;Spin</code></li></ul>
           </li>
           <li class="rung rung--2">
             <div class="rung__badge"><span>🌟</span>Creator Activo</div>
-            <p class="rung__req">Reclama el pack de 3.000 vistas en una semana.</p>
-            <ul class="rung__cmds"><li><code>;Invisible</code></li><li><code>;View</code> desde otro jugador</li><li><code>;Kick</code> solo para quien rompa las reglas</li></ul>
+            <p class="rung__req">3.000 vistas en una semana.</p>
+            <ul class="rung__cmds"><li><code>;Shoutout</code> saluda a un jugador</li><li><code>;View</code> desde otro jugador, aunque esté lejos</li><li><code>;Invisible</code>, <code>;Fire</code>, <code>;Smoke</code>, <code>;BigHead</code></li></ul>
           </li>
           <li class="rung rung--3">
             <div class="rung__badge"><span>🔥</span>Creator Viral</div>
-            <p class="rung__req">Reclama el pack de 3.500 vistas en una semana.</p>
-            <ul class="rung__cmds"><li><code>;GoLive</code> avisa a todos los servidores</li><li>11 disfraces: <code>;Buffify</code>, <code>;Frogify</code>, <code>;Dinofy</code>…</li></ul>
+            <p class="rung__req">3.500 vistas en una semana.</p>
+            <ul class="rung__cmds"><li><code>;GoLive</code> avisa a todos los servidores</li><li><code>;Confetti</code> y emotes de vehículos</li><li>11 disfraces: <code>;Buffify</code>, <code>;Frogify</code>, <code>;Dinofy</code>…</li></ul>
           </li>
           <li class="rung rung--4">
             <div class="rung__badge"><span>🏆</span>Creator Estrella</div>
-            <p class="rung__req">Reclama el pack de 4.500 vistas en una semana.</p>
-            <ul class="rung__cmds"><li><code>;CreatorEvent</code>: Golden Hour, Lucky Hour, Egg Rush o Hatch Frenzy</li><li><code>;Clone</code>, <code>;Char</code>, <code>;Teleport</code>, <code>;Size</code></li><li>Materiales: <code>;Gold</code>, <code>;Neon</code>, <code>;Ghost</code>…</li></ul>
+            <p class="rung__req">4.500 vistas en una semana.</p>
+            <ul class="rung__cmds"><li><code>;CreatorEvent</code>: Golden Hour, Lucky Hour, Egg Rush o Hatch Frenzy</li><li><code>;Spotlight</code>, <code>;Vote</code> y cuenta regresiva</li><li><code>;Clone</code>, <code>;Char</code>, <code>;Size</code>, materiales…</li></ul>
           </li>
           <li class="rung rung--5">
             <div class="rung__badge"><span>👑</span>Creator Elite</div>
-            <p class="rung__req">Reclama el pack mensual: 3 videos y 5.000 vistas en el mes.</p>
-            <ul class="rung__cmds"><li><code>;Fly</code> y <code>;God</code></li><li><code>;Fog</code>, <code>;FogColor</code> y <code>;Disco</code> en todo el servidor</li><li>1 mes de Admin Abuse con el admin</li></ul>
+            <p class="rung__req">5.000 vistas en una semana.</p>
+            <ul class="rung__cmds"><li><code>;Fly</code>, <code>;God</code> y <code>;Fireworks</code></li><li><code>;Fog</code>, <code>;FogColor</code> y <code>;Disco</code> en todo el servidor</li><li><code>;Aura</code></li></ul>
           </li>
         </ol>
         <p class="cr-levels__more">La lista completa con cómo usar cada comando está en tu panel, en “Comandos”.</p>
@@ -129,9 +147,9 @@
         <div class="tickets">
           <article class="ticket"><p class="ticket__views">1.000<span>vistas</span></p><ul><li>7 días de VIP</li><li>1 mascota épica</li></ul></article>
           <article class="ticket"><p class="ticket__views">2.500<span>vistas</span></p><ul><li>10 días de VIP</li><li>2 mascotas épicas</li></ul></article>
-          <article class="ticket"><p class="ticket__views">3.000<span>vistas</span></p><ul><li>12 días de VIP</li><li>1 mascota legendaria</li><li class="up">Subes a Creator Activo</li></ul></article>
-          <article class="ticket"><p class="ticket__views">3.500<span>vistas</span></p><ul><li>15 días de VIP</li><li>1 legendaria y 1 épica</li><li class="up">Subes a Creator Viral</li></ul></article>
-          <article class="ticket ticket--top"><p class="ticket__views">4.500<span>vistas</span></p><ul><li>21 días de VIP</li><li>1 mascota mítica</li><li class="up">Subes a Creator Estrella</li></ul></article>
+          <article class="ticket"><p class="ticket__views">3.000<span>vistas</span></p><ul><li>12 días de VIP</li><li>1 mascota legendaria</li></ul></article>
+          <article class="ticket"><p class="ticket__views">3.500<span>vistas</span></p><ul><li>15 días de VIP</li><li>1 legendaria y 1 épica</li></ul></article>
+          <article class="ticket ticket--top"><p class="ticket__views">4.500<span>vistas</span></p><ul><li>21 días de VIP</li><li>1 mascota mítica</li></ul></article>
         </div>
         <p class="cr-rewards__vip">¿Ya tienes VIP para siempre? Entonces eliges un boost x2 de monedas, suerte o incubación: de 2 h (1.000 vistas) a 6 h (4.500 vistas).</p>
 
@@ -143,7 +161,6 @@
           <ul class="month__list">
             <li>30 días de VIP (u 8 h de boost)</li>
             <li>1 mascota mítica y 1 legendaria</li>
-            <li>Subes a Creator Elite</li>
             <li>1 mes de Admin Abuse con el admin</li>
           </ul>
         </div>
@@ -198,6 +215,9 @@
         <details><summary>¿Quién cuenta las vistas?</summary><p>Un moderador abre tu video y escribe las vistas que tiene. Si siguen subiendo, pide un “recuento” desde tu panel.</p></details>
         <details><summary>¿Puedo reclamar dos veces en la misma semana?</summary><p>No. Una vez por semana y una vez por mes. Si reclamas con 1.000 vistas, esa semana ya queda cobrada aunque luego llegues a 4.500.</p></details>
         <details><summary>¿Cómo vinculo mi cuenta de Roblox?</summary><p>Al aplicar buscas tu cuenta y la eliges de la lista; un moderador confirma que es tuya. Si no aparece, juega Sky Eggs unos minutos y vuelve a buscarla.</p></details>
+        <details><summary>¿Cómo subo de nivel?</summary><p>Solo. Cuando tus vistas aprobadas de la semana llegan a 3.000, 3.500, 4.500 o 5.000, el juego y Discord te dan el nivel nuevo y te llega un correo al buzón.</p></details>
+        <details><summary>¿Puedo bajar de nivel?</summary><p>Sí: si pasa una semana entera (lunes a domingo) sin que subas ningún video, vuelves a Creator. El viernes te avisamos por el buzón si todavía no has subido nada esa semana.</p></details>
+        <details><summary>Ya tenía el rango de creador en el juego, ¿qué hago?</summary><p>Aplica aquí con tu cuenta de Discord. Al entrar al juego te llega un aviso al buzón con 3 días para hacerlo. La fecha límite para todos es el <strong>1 de enero de 2027</strong>: quien no esté aprobado para entonces pierde el rango.</p></details>
         <details><summary>¿Dónde recibo los premios?</summary><p>En el buzón del Lobby del juego. Si no estás conectado, llegan cuando entres.</p></details>
       </div>
     </section>
@@ -216,5 +236,6 @@
       <p class="footer__legal"><a href="/">Volver a Sky Eggs</a></p>
     </div>
   </footer>
+  <script src="/js/creators.js?v=__ASSET_V__" defer></script>
 </body>
 </html>

@@ -205,6 +205,39 @@ export function openDb(path) {
     ["auto_error", "TEXT"], ["auto_fails", "INTEGER NOT NULL DEFAULT 0"], ["auto_meta", "TEXT"], ["track_until", "INTEGER"],
   ]) if (!evCols().includes(c)) db.exec(`ALTER TABLE evidences ADD COLUMN ${c} ${def}`);
   if (!cols("applications").includes("roblox_user_id")) db.exec("ALTER TABLE applications ADD COLUMN roblox_user_id INTEGER");
+
+  // ---------- Rangos automáticos, avisos al buzón y creadores antiguos ----------
+  // players.creator_tier: nivel de creador que el juego reporta en cada pull (0 = ninguno, 1 = Creator … 5 = Elite).
+  if (!cols("players").includes("creator_tier")) db.exec("ALTER TABLE players ADD COLUMN creator_tier INTEGER");
+  // creators.tier: rango que decide la página (Creator/Active/Viral/Star/Elite o 'None' si se le quitó).
+  for (const [c, def] of [
+    ["tier", "TEXT"], ["tier_changed_at", "INTEGER"], ["warn_week", "INTEGER"], ["eval_week", "INTEGER"],
+    ["public_profile", "INTEGER NOT NULL DEFAULT 1"],
+  ]) if (!cols("creators").includes(c)) db.exec(`ALTER TABLE creators ADD COLUMN ${c} ${def}`);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS notices (
+      id INTEGER PRIMARY KEY,
+      roblox_user_id INTEGER NOT NULL,
+      discord_id TEXT,
+      kind TEXT NOT NULL,             -- welcome | promoted | demotion_warning | demoted | legacy_join | legacy_removed | removed | tier_set
+      param TEXT,
+      reward_id TEXT,                 -- fila de rewards que lo lleva al buzón del juego
+      actor TEXT,                     -- quién lo provocó (sistema o moderador)
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS notices_ts ON notices(created_at);
+    CREATE INDEX IF NOT EXISTS notices_user ON notices(roblox_user_id, created_at);
+    CREATE TABLE IF NOT EXISTS legacy_creators (
+      roblox_user_id INTEGER PRIMARY KEY,
+      name TEXT NOT NULL,
+      game_tier INTEGER NOT NULL,
+      status TEXT NOT NULL,           -- notified | applied | approved | removed
+      notified_at INTEGER NOT NULL,
+      deadline_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      removed_at INTEGER
+    );
+  `);
   return db;
 }
 

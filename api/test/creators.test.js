@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { openDb } from "../src/db.js";
 import { createApp } from "../src/app.js";
 import { hashPassword } from "../src/auth.js";
-import { gamePull } from "../src/logic.js";
+import { gamePull, gameAck } from "../src/logic.js";
 import * as C from "../src/creators.js";
 import { robuxFor, bestPack } from "../src/program.js";
 
@@ -99,10 +99,10 @@ test("flujo completo: solicitud → vínculo → evidencia → reclamo semanal �
   assert.throws(() => C.claimPack(db, c, "cre", { period: "week", which: "current" }, now), /already_claimed/);
   assert.throws(() => C.claimPack(db, c, "cre", { period: "month", which: "current" }, now), /no_pack/);
 
-  // El juego recibe: nivel base (de la vinculación) y el pack con su periodo absoluto
+  // El juego recibe: rango base exacto + bienvenida (de la vinculación) y el pack con su periodo absoluto
   const pull = gamePull(db, c, { players: [{ userId: 500, name: "CreadorPro", level: 1 }] }, now);
   const kinds = pull.rewards.map((r) => `${r.kind}:${r.pack}:${r.period || ""}`).sort();
-  assert.deepEqual(kinds, ["creator:V3000:w2968", "tier:Creator:"]);
+  assert.deepEqual(kinds, ["creator:V3000:w2968", "notice:welcome:Creator", "tierset:Creator:"]);
 
   // Registro con nombres
   const log = C.auditList(db).map((a) => `${a.actor_name} ${a.action}`);
@@ -336,4 +336,163 @@ test("vistas automáticas: se aprueban, se refrescan y actualizan el bono; si fa
   C.reviewEvidence(db, actor("mod"), { id: e.id, action: "update", views: 35_000 }, now);
   assert.equal(db.prepare("SELECT track FROM evidences WHERE id = ?").get(e.id).track, "manual");
   assert.equal(C.dueForProbe(db, c, now + 30 * 86400_000).length, 0);
+});
+
+// ---------- Rangos automáticos, avisos y creadores antiguos (2026-11-23) ----------
+import { evaluateCreators, handleGameCreator, legacyList, noticeList } from "../src/lifecycle.js";
+import { rankForViews } from "../src/program.js";
+import { publicCreators, creatorsDashboard, clearPublicCache } from "../src/insights.js";
+import { rolesForTier, setMemberRoles } from "../src/discord.js";
+import { runRoleJobs } from "../src/app.js";
+
+const cfgAuto = () => {
+  const c = cfg();
+  c.creators = { ...c.creators, autoTiers: true, warnDaysBefore: 3, demotionGraceHours: 24, legacyNoticeDays: 3, legacyDeadline: Date.parse("2027-01-01T00:00:00-05:00") };
+  return c;
+};
+const pendingOf = (db, userId) => db.prepare("SELECT kind, pack, period FROM rewards WHERE user_id = ? AND status = 'pending' ORDER BY created_at, rowid").all(userId).map((r) => `${r.kind}:${r.pack}${r.period ? `:${r.period}` : ""}`);
+function approvedCreator(db, c, id, userId, at) {
+  seedUser(db, id, { creator: true }); seedRoblox(db, c, userId, `Cre_${userId}`);
+  C.requestLink(db, id, userId, at); C.reviewLink(db, actor("mod"), { discordId: id, action: "approve" }, at);
+}
+
+test("rangos por vistas semanales: 3k Activo, 3.5k Viral, 4.5k Estrella, 5k Elite", () => {
+  assert.equal(rankForViews(2999), "Creator");
+  assert.equal(rankForViews(3000), "Active");
+  assert.equal(rankForViews(3500), "Viral");
+  assert.equal(rankForViews(4500), "Star");
+  assert.equal(rankForViews(5000), "Elite");
+});
+
+test("sube solo con las vistas, avisa 3 días antes y baja a Creator si una semana no sube video", () => {
+  const db = openDb(":memory:"); const c = cfgAuto();
+  const mon = Date.parse("2026-11-09T10:00:00-05:00"); // semana 2967
+  approvedCreator(db, c, "cre", 600, mon);
+  assert.equal(C.getCreator(db, "cre").tier, "Creator");
+  db.prepare("UPDATE rewards SET status = 'delivered'").run();
+
+  // 3.600 vistas en la semana → Viral, con aviso al buzón
+  const e = C.addEvidence(db, "cre", { url: "https://youtu.be/v1", platform: "YouTube", publishedOn: "2026-11-10" }, mon + 86400_000);
+  C.reviewEvidence(db, actor("mod"), { id: e.id, action: "approve", views: 3600 }, mon + 86400_000);
+  let out = evaluateCreators(db, c, mon + 86400_000);
+  assert.equal(out.changes[0].to, "Viral");
+  assert.equal(C.getCreator(db, "cre").tier, "Viral");
+  assert.deepEqual(pendingOf(db, 600), ["tierset:Viral", "notice:promoted:Viral"]);
+  assert.equal(out.roleJobs[0].tierKey, "Viral");
+  db.prepare("UPDATE rewards SET status = 'delivered'").run();
+
+  // Semana 2968 sin video: el viernes llega el aviso (una sola vez)
+  const fri = Date.parse("2026-11-20T08:00:00-05:00");
+  out = evaluateCreators(db, c, fri);
+  assert.equal(out.warnings, 1);
+  assert.equal(evaluateCreators(db, c, fri + 3600_000).warnings, 0);
+  assert.deepEqual(pendingOf(db, 600), ["notice:demotion_warning:Viral"]);
+  db.prepare("UPDATE rewards SET status = 'delivered'").run();
+
+  // El lunes aún no baja (margen de 24 h); el martes baja a Creator
+  assert.equal(evaluateCreators(db, c, Date.parse("2026-11-23T10:00:00-05:00")).changes.length, 0);
+  out = evaluateCreators(db, c, Date.parse("2026-11-24T01:00:00-05:00"));
+  assert.deepEqual(out.changes, [{ discordId: "cre", from: "Viral", to: "Creator" }]);
+  assert.deepEqual(pendingOf(db, 600), ["tierset:Creator", "notice:demoted:Viral"]);
+  // No vuelve a bajar ni a subir sin vistas nuevas
+  assert.equal(evaluateCreators(db, c, Date.parse("2026-11-24T05:00:00-05:00")).changes.length, 0);
+  assert.ok(noticeList(db).some((n) => n.kind === "demoted"));
+});
+
+test("con un video en la semana no baja aunque esté en revisión", () => {
+  const db = openDb(":memory:"); const c = cfgAuto();
+  const mon = Date.parse("2026-11-09T10:00:00-05:00");
+  approvedCreator(db, c, "cre", 610, mon);
+  db.prepare("UPDATE creators SET tier = 'Star' WHERE discord_id = 'cre'").run();
+  C.addEvidence(db, "cre", { url: "https://youtu.be/p1", platform: "YouTube", publishedOn: "2026-11-21" }, Date.parse("2026-11-21T10:00:00-05:00"));
+  const out = evaluateCreators(db, c, Date.parse("2026-11-24T02:00:00-05:00"));
+  assert.equal(out.changes.length, 0);
+  assert.equal(C.getCreator(db, "cre").tier, "Star");
+});
+
+test("creadores antiguos: aviso al entrar, 3 días para aplicar, y fecha límite del 1 de enero", () => {
+  const db = openDb(":memory:"); const c = cfgAuto();
+  const t0 = Date.parse("2026-11-23T10:00:00-05:00");
+  // El juego reporta a un jugador con el tag de creador que no está en la página
+  gamePull(db, c, { players: [{ userId: 700, name: "Viejo_Creator", displayName: "Viejo", level: 50, creatorTier: 3 }] }, t0);
+  assert.equal(legacyList(db)[0].status, "notified");
+  let pull = gamePull(db, c, { players: [{ userId: 700, name: "Viejo_Creator", level: 50, creatorTier: 3 }] }, t0 + 60_000);
+  assert.deepEqual(pull.rewards.map((r) => `${r.kind}:${r.pack}:${r.period}`), ["notice:legacy_join:26/11/2026"]);
+  gameAck(db, { ids: pull.rewards.map((r) => r.id) });
+
+  // Otro antiguo aplica a tiempo: conserva el rol mientras revisan
+  gamePull(db, c, { players: [{ userId: 701, name: "Aplica_Ya", level: 20, creatorTier: 1 }] }, t0);
+  seedUser(db, "ap", {});
+  C.submitApplication(db, "ap", { robloxUserId: 701, age13: true, platforms: [{ type: "TikTok", url: "https://tiktok.com/@ap" }], about: "Soy creador desde hace tiempo." }, t0 + 3600_000);
+  gamePull(db, c, { players: [{ userId: 701, name: "Aplica_Ya", level: 20, creatorTier: 1 }] }, t0 + 5 * 86400_000);
+  assert.equal(legacyList(db).find((l) => l.roblox_user_id === 701).status, "applied");
+
+  // El primero no aplicó: pasado el plazo pierde el rol al entrar
+  pull = gamePull(db, c, { players: [{ userId: 700, name: "Viejo_Creator", level: 50, creatorTier: 3 }] }, t0 + 3 * 86400_000 + 60_000);
+  assert.deepEqual(pull.rewards.map((r) => `${r.kind}:${r.pack}`), ["tierset:None", "notice:legacy_removed"]);
+  assert.equal(legacyList(db).find((l) => l.roblox_user_id === 700).status, "removed");
+  // Mientras el cambio no se entrega, no se repite
+  pull = gamePull(db, c, { players: [{ userId: 700, name: "Viejo_Creator", level: 50, creatorTier: 3 }] }, t0 + 3 * 86400_000 + 120_000);
+  assert.equal(pull.rewards.filter((r) => r.kind === "notice").length, 1);
+
+  // Aprobarlo lo deja en Creator (rango más bajo) y lo marca aprobado
+  const app = C.myApplication(db, "ap");
+  C.reviewApplication(db, actor("mod"), { id: app.id, action: "approve" }, t0 + 6 * 86400_000);
+  assert.equal(legacyList(db).find((l) => l.roblox_user_id === 701).status, "approved");
+  assert.ok(pendingOf(db, 701).includes("tierset:Creator"));
+
+  // Quien aparece por primera vez después del 1 de enero de 2027 pierde el rol de inmediato
+  pull = gamePull(db, c, { players: [{ userId: 702, name: "Tarde_2027", level: 9, creatorTier: 2 }] }, Date.parse("2027-01-02T10:00:00-05:00"));
+  assert.deepEqual(pull.rewards.map((r) => `${r.kind}:${r.pack}`), ["tierset:None", "notice:legacy_removed"]);
+  // Y un aviso de diciembre no pasa del 1 de enero
+  gamePull(db, c, { players: [{ userId: 703, name: "Dic_31", level: 9, creatorTier: 1 }] }, Date.parse("2026-12-31T10:00:00-05:00"));
+  assert.equal(legacyList(db).find((l) => l.roblox_user_id === 703).deadline_at, Date.parse("2027-01-01T00:00:00-05:00"));
+});
+
+test("lista pública y panel del staff", async () => {
+  const db = openDb(":memory:"); const c = cfgAuto();
+  const now = Date.parse("2026-11-18T10:00:00-05:00");
+  seedRoblox(db, c, 800, "Publico_1");
+  seedUser(db, "pub", {});
+  const app = C.submitApplication(db, "pub", { robloxUserId: 800, age13: true, platforms: [{ type: "YouTube", url: "https://youtube.com/@pub", followers: 5000 }], about: "Videos de huevos todos los días." }, now);
+  C.reviewApplication(db, actor("mod"), { id: app.id, action: "approve" }, now);
+  const fake = async (url) => ({ ok: true, status: 200, json: async () => ({ data: [{ targetId: 800, state: "Completed", imageUrl: "https://tr.rbxcdn.com/abc.png" }] }) });
+  clearPublicCache();
+  let pub = await publicCreators(db, c, fake, now);
+  assert.equal(pub.creators.length, 1);
+  assert.equal(pub.creators[0].platforms[0].followers, 5000);
+  assert.equal(pub.creators[0].avatar, "https://tr.rbxcdn.com/abc.png");
+  assert.equal(pub.creators[0].tierName, "Creator");
+  C.setPublicProfile(db, "pub", false);
+  clearPublicCache();
+  pub = await publicCreators(db, c, fake, now);
+  assert.equal(pub.creators.length, 0);
+
+  const e = C.addEvidence(db, "pub", { url: "https://youtu.be/d1", platform: "YouTube", publishedOn: "2026-11-17" }, now);
+  C.reviewEvidence(db, actor("mod"), { id: e.id, action: "approve", views: 3100 }, now);
+  const d = creatorsDashboard(db, c, now);
+  assert.equal(d.summary.creators, 1);
+  assert.equal(d.summary.weekViews, 3100);
+  assert.equal(d.creators[0].next.key, "Active");
+  assert.equal(d.weeks.length, 8);
+  assert.equal(d.platforms[0].platform, "YouTube");
+});
+
+test("roles de Discord con el bot: pone el del rango y quita los demás", async () => {
+  const db = openDb(":memory:"); const c = cfgAuto();
+  c.discord = { ...c.discord, botToken: "bot-token", levelRoles: { Active: "111111", Viral: "222222", Star: "", Elite: "444444" } };
+  assert.deepEqual(rolesForTier(c, "Viral"), { add: [ROLE.creator, "222222"], remove: ["111111", "444444"] });
+  assert.deepEqual(rolesForTier(c, "None"), { add: [], remove: [ROLE.creator, "111111", "222222", "444444"] });
+  const calls = [];
+  const fake = async (url, init) => { calls.push(`${init.method} ${url.split("/members/")[1]} ${init.headers.authorization}`); return { ok: true, status: 204, json: async () => null }; };
+  const r = await setMemberRoles(c, "123456789", rolesForTier(c, "Elite"), "test", fake);
+  assert.equal(r.ok, true);
+  assert.ok(calls.includes(`PUT 123456789/roles/444444 Bot bot-token`));
+  assert.ok(calls.includes(`DELETE 123456789/roles/111111 Bot bot-token`));
+  seedUser(db, "123456789", {});
+  await runRoleJobs(db, c, [{ discordId: "123456789", tierKey: "Creator" }], fake, silent);
+  assert.equal(C.getDiscordUser(db, "123456789").roles.creator, true);
+  // Sin token no hace nada
+  c.discord.botToken = "";
+  assert.equal((await setMemberRoles(c, "123456789", { add: ["1"] }, "x", fake)).skipped, true);
 });
