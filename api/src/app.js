@@ -20,8 +20,8 @@ import { tx } from "./db.js";
 import * as C from "./creators.js";
 import { probeViews, updateYtDlp } from "./views.js";
 import { verifyInteraction, interactionsEnabled, REPLY, EPHEMERAL } from "./bot.js";
-import { announceVideo, refreshVideoMessage, handleVideoButton } from "./videos.js";
-import { receiveEggAlert, updateEggAlert, handleEggButton, expireOldAlerts, refreshEggMessage } from "./eggAlerts.js";
+import { announceVideo, refreshVideoMessage, handleVideoButton, resendVideo } from "./videos.js";
+import { receiveEggAlert, updateEggAlert, handleEggButton, expireOldAlerts, refreshEggMessage, resendEggAlert } from "./eggAlerts.js";
 import { saveCatalog, catalog, assetImage, syncAssets, assetStatus } from "./assets.js";
 
 // Límite simple por clave (ventana deslizante en memoria).
@@ -433,9 +433,17 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
     "POST /api/mod/bot/announce-video": async (req) => {
       checkOrigin(req); const a = staffActor(req);
       const b = await readJson(req, 256);
-      db.prepare("UPDATE evidences SET announce_msg = NULL WHERE id = ? AND announce_msg IS NULL").run(Number(b.id));
-      const out = await announceVideo(db, cfg, b.id, fetchImpl, log);
-      C.audit(db, a, "bot.announce_video", null, { id: Number(b.id), ok: out.sent, motivo: out.reason || null });
+      // resend: borra el anuncio anterior y lo publica otra vez con el formato actual (para probar cambios).
+      const out = b.resend === true ? await resendVideo(db, cfg, b.id, fetchImpl, log) : await announceVideo(db, cfg, b.id, fetchImpl, log);
+      C.audit(db, a, b.resend === true ? "bot.resend_video" : "bot.announce_video", null, { id: Number(b.id), ok: out.sent, motivo: out.reason || null });
+      return out;
+    },
+    // Reenviar una alerta de huevo (borra la anterior y publica de nuevo con el formato actual).
+    "POST /api/mod/bot/resend-egg": async (req) => {
+      checkOrigin(req); const a = staffActor(req);
+      const b = await readJson(req, 256);
+      const out = await resendEggAlert(db, cfg, b.id, fetchImpl, log);
+      C.audit(db, a, "bot.resend_egg", null, { id: Number(b.id), ok: out.sent, motivo: out.reason || null });
       return out;
     },
     "GET /api/mod/assets": async (req) => { staffActor(req); return { ...assetStatus(db), apiKey: Boolean(cfg.roblox.apiKey), items: catalog(db, cfg) }; },

@@ -134,6 +134,7 @@ export function gamePull(db, cfg, body, now = Date.now()) {
     const pending = db.prepare("SELECT id, user_id AS userId, tier, source, kind, pack, period FROM rewards WHERE user_id = ? AND status = 'pending' ORDER BY created_at LIMIT 20");
     const rewards = [];
     recordPullHour(db, jobId, players.length, now);
+    db.prepare("INSERT INTO live_servers (job_id, players, last_pull) VALUES (?, ?, ?) ON CONFLICT(job_id) DO UPDATE SET players = excluded.players, last_pull = excluded.last_pull").run(jobId, players.length, now);
     const seen = db.prepare("SELECT last_seen FROM players WHERE user_id = ?");
     for (const p of players) {
       const prevSeen = seen.get(p.userId)?.last_seen || null;

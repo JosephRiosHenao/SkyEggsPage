@@ -1446,9 +1446,9 @@
     const check = (ok, label, detail) => el("li", { class: ok ? "ok" : "bad" }, el("strong", {}, `${ok ? "✔" : "✖"} ${label}`), detail ? el("span", { class: "small muted" }, " — ", detail) : null);
     box.append(el("ul", { class: "checks" },
       check(st.bot, "Bot conectado (DISCORD_BOT_TOKEN)", st.bot ? null : "sin token no hay anuncios ni alertas"),
-      check(st.interactions, "Botones activos (DISCORD_PUBLIC_KEY + Interactions Endpoint URL)", st.interactions ? "funcionan ❤️ Me gusta, ¡Voy!, En mi idioma, Estadísticas y los avisos" : el("span", {}, "pon la Public Key en el .env y en el Developer Portal la URL ", el("code", {}, st.interactionsUrl))),
+      check(st.interactions, "Botones activos (DISCORD_PUBLIC_KEY + Interactions Endpoint URL)", st.interactions ? "funcionan 🚪 Unirse, 🔔 Egg Ping, ❤️ Me gusta y 📺 Más del creador" : el("span", {}, "pon la Public Key en el .env y en el Developer Portal la URL ", el("code", {}, st.interactionsUrl))),
       check(true, "Canal de videos aprobados", el("span", {}, ch(st.videoChannel), st.videoPingRole ? " · avisa a " : " · sin rol de aviso (DISCORD_ROLE_VIDEO_PING)", st.videoPingRole ? ch(st.videoPingRole) : null)),
-      check(true, "Canal de alertas de huevos", el("span", {}, ch(st.eggChannel), " · ping a ", ch(st.eggPingRole), ` · idioma ${st.eggLang}`)),
+      check(true, "Canal de alertas de huevos", el("span", {}, ch(st.eggChannel), " · ping a ", ch(st.eggPingRole), " · texto en inglés; los botones responden en el idioma de cada persona")),
       check(st.assets.total > 0, `Imágenes del juego guardadas: ${st.assets.saved || 0} de ${st.assets.total || 0}`, st.assets.total ? `${st.assets.apiKey ? "con ROBLOX_API_KEY (originales)" : "sin ROBLOX_API_KEY: miniaturas públicas (las privadas fallan)"}${st.assets.errors ? ` · ${st.assets.errors} con error` : ""}` : "vacío: el catálogo llega cuando arranca un servidor del juego publicado (no hace falta tocar nada)")));
     const acts = el("div", { class: "form-actions" },
       isAdmin() ? btn("🥚 Probar alerta de huevo", "btn--yolk", (b) => act(b, () => api("/api/mod/bot/test-egg", {}), "Alerta de prueba enviada al canal de huevos (sale como [STUDIO]).", () => show(current))) : null,
@@ -1456,17 +1456,18 @@
     box.append(acts);
     const when2 = (t) => (t ? ago(t) : "—");
     box.append(el("h3", {}, "Últimas alertas de huevos"), st.alerts.length ? el("div", { class: "tbl-wrap" }, el("table", { class: "tbl" },
-      el("thead", {}, el("tr", {}, ...["", "Huevo", "Isla", "Estado", "Discord", "Cuándo"].map((h) => el("th", {}, h)))),
+      el("thead", {}, el("tr", {}, ...["", "Huevo", "Isla", "Estado", "Discord", "Cuándo", ""].map((h) => el("th", {}, h)))),
       el("tbody", {}, ...st.alerts.map((x) => el("tr", {}, el("td", {}, `#${x.id}`), el("td", {}, x.asset, x.studio ? el("span", { class: "sub" }, "prueba") : null), el("td", {}, x.place || "—"),
         el("td", {}, { active: "🟢 en el mapa", grabbed: `✅ ${x.grabbed_by_name || ""}`, gone: "⌛ se fue" }[x.status] || x.status),
         el("td", {}, x.posted ? pill("approved", "Publicada") : pill("rejected", "No salió"), x.post_error ? el("span", { class: "sub" }, x.post_error) : null),
-        el("td", { class: "nowrap" }, when2(x.created_at)))))))
+        el("td", { class: "nowrap" }, when2(x.created_at)),
+        el("td", { class: "actions-cell" }, btn("Reenviar", "btn--white", (b) => act(b, () => api("/api/mod/bot/resend-egg", { id: x.id }), (o) => (o.sent ? "Reenviada con el formato actual (se borró el mensaje anterior)." : `No salió: ${o.reason}`), () => show(current)))))))))
       : empty("Todavía no hay alertas. Llegan cuando nace un huevo absurdo en el juego publicado."));
     box.append(el("h3", {}, "Últimos videos aprobados"), st.videos.length ? el("div", { class: "tbl-wrap" }, el("table", { class: "tbl" },
       el("thead", {}, el("tr", {}, el("th", {}, "Video"), el("th", {}, "Red"), el("th", { class: "num-cell" }, "Vistas"), el("th", {}, "Discord"), el("th", {}, ""))),
       el("tbody", {}, ...st.videos.map((v) => el("tr", {}, el("td", {}, link(v.url, v.title || "abrir")), el("td", {}, v.platform), el("td", { class: "num-cell" }, n(v.views)),
         el("td", {}, v.posted ? pill("approved", "Anunciado") : pill("pending", "Sin anunciar"), v.announce_error ? el("span", { class: "sub" }, v.announce_error) : null),
-        el("td", { class: "actions-cell" }, v.posted ? null : btn("Anunciar", "btn--white", (b) => act(b, () => api("/api/mod/bot/announce-video", { id: v.id }), (o) => (o.sent ? "Anunciado en Discord." : `No salió: ${o.reason}`), () => show(current)))))))))
+        el("td", { class: "actions-cell" }, btn(v.posted ? "Reenviar" : "Anunciar", "btn--white", (b) => act(b, () => api("/api/mod/bot/announce-video", { id: v.id, resend: Boolean(v.posted) }), (o) => (o.sent ? (v.posted ? "Reenviado con el formato actual (se borró el anuncio anterior)." : "Anunciado en Discord.") : `No salió: ${o.reason}`), () => show(current)))))))))
       : empty("Todavía no hay videos aprobados."));
     return box;
   }

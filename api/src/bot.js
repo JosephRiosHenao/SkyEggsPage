@@ -41,6 +41,7 @@ export async function discordApi(cfg, method, path, body, { files = [], fetchImp
 
 export const sendMessage = (cfg, channelId, payload, opts) => discordApi(cfg, "POST", `/channels/${channelId}/messages`, payload, opts);
 export const editMessage = (cfg, channelId, messageId, payload, opts) => discordApi(cfg, "PATCH", `/channels/${channelId}/messages/${messageId}`, payload, opts);
+export const deleteMessage = (cfg, channelId, messageId, opts) => discordApi(cfg, "DELETE", `/channels/${channelId}/messages/${messageId}`, undefined, opts);
 export const addReaction = (cfg, channelId, messageId, emoji, opts) =>
   discordApi(cfg, "PUT", `/channels/${channelId}/messages/${messageId}/reactions/${encodeURIComponent(emoji)}/@me`, undefined, opts);
 
