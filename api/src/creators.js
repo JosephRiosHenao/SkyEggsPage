@@ -39,6 +39,47 @@ function httpUrl(v) {
 }
 export const PLATFORMS = ["YouTube", "TikTok", "Twitch", "Kick", "Instagram", "Facebook", "Otra"];
 
+// Enlace comparable: sin parámetros de rastreo (?_r=…&_t=…, ?si=…), sin "www." ni "/" final.
+export function canonicalUrl(url) {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.replace(/^(www|m)\./, "").toLowerCase();
+    const keep = host.includes("youtube.com") && u.pathname === "/watch" ? `?v=${u.searchParams.get("v") || ""}` : "";
+    return `${host}${u.pathname.replace(/\/+$/, "").toLowerCase()}${keep}`;
+  } catch { return String(url || ""); }
+}
+// Redes de una solicitud: tipo válido, enlace http(s), seguidores enteros; sin repetidas (se queda la de más seguidores).
+export function cleanPlatforms(list) {
+  const out = [];
+  for (const p of (Array.isArray(list) ? list : []).slice(0, 12)) {
+    const item = {
+      type: PLATFORMS.includes(p?.type) ? p.type : "Otra",
+      url: httpUrl(p?.url),
+      followers: Math.max(0, Math.min(1e9, Math.floor(Number(p?.followers) || 0))),
+    };
+    if (!item.url) continue;
+    const dup = out.find((o) => canonicalUrl(o.url) === canonicalUrl(item.url));
+    if (dup) { dup.followers = Math.max(dup.followers, item.followers); continue; }
+    out.push(item);
+  }
+  return out.slice(0, 6);
+}
+// ¿El enlace es un video suelto en vez del canal? (lo marca el panel para que el moderador lo corrija).
+export function looksLikeVideo(url) {
+  try {
+    const u = new URL(url);
+    const h = u.hostname.replace(/^(www|m)\./, "");
+    if (h === "youtu.be") return true;
+    if (h.endsWith("youtube.com")) return /^\/(shorts|watch|live|embed)\b/.test(u.pathname);
+    if (h.endsWith("tiktok.com")) return /\/video\/|\/photo\//.test(u.pathname) || h.startsWith("vm.") || h.startsWith("vt.");
+    if (h.endsWith("twitch.tv")) return /^\/videos\/|\/clip\//.test(u.pathname) || h.startsWith("clips.");
+    if (h.endsWith("kick.com")) return /\/videos?\/|\/clips?\//.test(u.pathname);
+    if (h.endsWith("instagram.com")) return /^\/(p|reel|reels|tv)\//.test(u.pathname);
+    if (h.endsWith("facebook.com")) return /\/videos\/|\/reel\/|^\/watch/.test(u.pathname);
+  } catch { /* enlace raro */ }
+  return false;
+}
+
 // ---------- Registro de acciones ----------
 export function audit(db, actor, action, target, details) {
   db.prepare("INSERT INTO audit (ts, actor_id, actor_name, actor_role, action, target, details) VALUES (?, ?, ?, ?, ?, ?, ?)")
@@ -90,11 +131,7 @@ export function submitApplication(db, discordId, body, now = Date.now()) {
   const player = playedPlayer(db, body?.robloxUserId);
   const email = str(body?.email, 120);
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Fail("bad_email");
-  const platforms = (Array.isArray(body?.platforms) ? body.platforms : []).slice(0, 6).map((p) => ({
-    type: PLATFORMS.includes(p?.type) ? p.type : "Otra",
-    url: httpUrl(p?.url),
-    followers: Math.max(0, Math.min(1e9, Math.floor(Number(p?.followers) || 0))),
-  })).filter((p) => p.url);
+  const platforms = cleanPlatforms(body?.platforms);
   if (!platforms.length) throw new Fail("need_platform");
   const about = textBlock(body?.about, 1000);
   if (about.length < 20) throw new Fail("about_short");
@@ -401,6 +438,32 @@ export function reviewApplication(db, actor, body, now = Date.now()) {
     audit(db, actor, `application.${action}`, nameOf(db, a.discord_id), { id: a.id, roblox: `${a.roblox_name}${a.roblox_user_id ? ` (${a.roblox_user_id})` : ""}`, vinculada: linked || null, note: note(body) });
     return { ok: true, status, linked };
   });
+}
+
+// Un moderador corrige los datos de una solicitud (en cualquier estado): redes, video de ejemplo y correo.
+// Sirve para quitar redes repetidas o cambiar un video suelto por el enlace del canal. Queda en el registro.
+export function editApplication(db, actor, body, now = Date.now()) {
+  const a = db.prepare("SELECT * FROM applications WHERE id = ?").get(Number(body?.id));
+  if (!a) throw new Fail("not_found", 404);
+  if (a.discord_id === String(actor.id)) throw new Fail("own_item", 403);
+  const platforms = cleanPlatforms(body?.platforms);
+  if (!platforms.length) throw new Fail("need_platform");
+  const email = str(body?.email, 120);
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Fail("bad_email");
+  const rawSample = str(body?.sampleUrl, 400);
+  const sampleUrl = httpUrl(rawSample);
+  if (rawSample && !sampleUrl) throw new Fail("bad_url");
+  const before = { platforms: JSON.parse(a.platforms), sample: a.sample_url || "", email: a.email || "" };
+  const changes = {};
+  const short = (list) => list.map((p) => `${p.type} ${p.url}${p.followers ? ` (${p.followers})` : ""}`).join(" | ");
+  if (JSON.stringify(before.platforms) !== JSON.stringify(platforms)) changes.redes = `${short(before.platforms)} → ${short(platforms)}`;
+  if (before.sample !== (sampleUrl || "")) changes.video = `${before.sample || "—"} → ${sampleUrl || "—"}`;
+  if (before.email !== (email || "")) changes.correo = `${before.email || "—"} → ${email || "—"}`;
+  if (!Object.keys(changes).length) throw new Fail("no_changes");
+  db.prepare("UPDATE applications SET platforms = ?, sample_url = ?, email = ?, edited_by = ?, edited_at = ? WHERE id = ?")
+    .run(JSON.stringify(platforms), sampleUrl || null, email || null, actor.name, now, a.id);
+  audit(db, actor, "application.edit", nameOf(db, a.discord_id), { id: a.id, ...changes, note: note(body) });
+  return { ok: true, platforms, sampleUrl: sampleUrl || null, email: email || null };
 }
 
 // Confirma la cuenta de Roblox. Si es nuevo en el programa (solicitud aprobada) entra en el rango

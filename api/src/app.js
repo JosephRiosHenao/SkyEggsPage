@@ -713,6 +713,13 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
       }
       return out;
     },
+    // Corregir datos de una solicitud (redes repetidas, video en vez del canal, correo).
+    "POST /api/mod/application/edit": async (req) => {
+      checkOrigin(req); const a = staffActor(req); const b = await readJson(req, 8192);
+      const out = run(() => C.editApplication(db, a, b));
+      clearPublicCache(); // el carrusel público muestra las redes
+      return out;
+    },
     "POST /api/mod/link": async (req) => { checkOrigin(req); const a = staffActor(req); const b = await readJson(req, 2048); return run(() => C.reviewLink(db, a, b)); },
     "POST /api/mod/evidence": async (req) => {
       checkOrigin(req); const a = staffActor(req); const b = await readJson(req, 2048);

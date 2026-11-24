@@ -624,3 +624,31 @@ test("solicitud rechazada: se quita el rango del juego si lo tenía", () => {
   gamePull(db, c, { players: [{ userId: 950, name: "Antiguo_X", level: 30, creatorTier: 2 }] }, t0 + 7200_000);
   assert.deepEqual(pendingOf(db, 950), ["tierset:None", "notice:rejected"]);
 });
+
+test("moderador corrige redes repetidas y un video en vez del canal (queda en el registro)", () => {
+  const db = openDb(":memory:"); const c = cfg();
+  seedUser(db, "cre", {}); seedUser(db, "mod", { moderator: true }); seedRoblox(db, c);
+  const tt = "https://www.tiktok.com/@rbx.kits?_r=1&_t=ZS-9BdvvCDZDSK";
+  // Al enviar ya se quitan las repetidas (mismo canal con otros parámetros de rastreo).
+  const { id } = C.submitApplication(db, "cre", { age13: true, robloxUserId: 500, about: "Quiero ser creador de Sky Eggs y subir videos.",
+    platforms: [{ type: "TikTok", url: tt, followers: 801 }, { type: "TikTok", url: tt, followers: 801 }, { type: "TikTok", url: "https://tiktok.com/@rbx.kits/", followers: 801 },
+      { type: "YouTube", url: "https://youtube.com/shorts/abc123", followers: 20 }] });
+  const app = C.myApplication(db, "cre");
+  assert.equal(app.platforms.length, 2);
+  assert.ok(C.looksLikeVideo(app.platforms[1].url));
+  assert.ok(!C.looksLikeVideo(app.platforms[0].url));
+  assert.ok(C.looksLikeVideo("https://www.tiktok.com/@a/video/123"));
+
+  assert.throws(() => C.editApplication(db, actor("cre"), { id, platforms: app.platforms }), /own_item/);
+  assert.throws(() => C.editApplication(db, actor("mod"), { id, platforms: [] }), /need_platform/);
+  assert.throws(() => C.editApplication(db, actor("mod"), { id, platforms: app.platforms }), /no_changes/);
+  const out = C.editApplication(db, actor("mod"), { id, platforms: [app.platforms[0], { type: "YouTube", url: "https://youtube.com/@rbxkits", followers: 20 }], sampleUrl: "https://youtube.com/shorts/abc123", note: "canal en vez del short" });
+  assert.equal(out.platforms[1].url, "https://youtube.com/@rbxkits");
+  const after = C.myApplication(db, "cre");
+  assert.equal(after.edited_by, "@mod");
+  assert.equal(after.sample_url, "https://youtube.com/shorts/abc123");
+  const log = C.auditList(db)[0];
+  assert.equal(log.action, "application.edit");
+  assert.match(log.details.redes, /shorts\/abc123.*→.*@rbxkits/);
+  assert.throws(() => C.editApplication(db, actor("mod"), { id, platforms: after.platforms, sampleUrl: "javascript:alert(1)" }), /bad_url/);
+});
