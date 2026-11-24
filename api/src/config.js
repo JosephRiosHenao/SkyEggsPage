@@ -53,6 +53,8 @@ export const config = {
       creator: process.env.DISCORD_ROLE_CREATOR || "1561051688125730897",
     },
     // Programa de staff (2026-11-23): roles de Discord de cada rango.
+    // Canal de anuncios del staff (el bot escribe y menciona al rango que corresponde).
+    announceChannel: process.env.DISCORD_ANNOUNCE_CHANNEL || "1566631711910133860",
     staffRoles: {
       Helper: process.env.DISCORD_ROLE_HELPER || "1563735797444771961",
       ModeratorJr: process.env.DISCORD_ROLE_MODERATORJR || "1563736116300087337",

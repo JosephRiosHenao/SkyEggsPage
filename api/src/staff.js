@@ -258,22 +258,27 @@ export function reviewStaffLink(db, actor, body, now = Date.now()) {
 }
 
 // ---------- Actividad que manda el juego (dentro del tx de /game/pull) ----------
-// p = { userId, name, staffTier, duty, staffActions }, prevSeen = last_seen anterior de ese jugador.
-export function handleGameStaff(db, cfg, p, prevSeen, now = Date.now()) {
+// p = { userId, name, staffTier, afk, staffActions }, prevSeen = last_seen anterior de ese jugador.
+export function handleGameStaff(db, cfg, p, prevSeen, now = Date.now(), jobId = null) {
   const tier = Number.isInteger(p.staffTier) ? p.staffTier : null;
   if (tier != null) db.prepare("UPDATE players SET staff_tier = ? WHERE user_id = ?").run(tier, p.userId);
   const linked = db.prepare("SELECT * FROM staff WHERE roblox_user_id = ? AND link_status = 'approved' AND rank != 'None'").get(p.userId);
   if (!(tier > 0) && !linked) return;
+  // Servidor donde está (para "Unirme a su servidor" en /staff/).
+  if (jobId && jobId !== "studio") db.prepare("UPDATE players SET job_id = ? WHERE user_id = ?").run(jobId, p.userId);
   // Tiempo conectado desde el pull anterior (máx. 150 s: si hubo un hueco largo no se cuenta).
   const gap = prevSeen ? now - prevSeen : 0;
   const secs = gap > 0 && gap <= 150_000 ? Math.round(gap / 1000) : 0;
   const a = p.staffActions || {};
   const num = (v) => Math.max(0, Math.min(500, Math.floor(Number(v) || 0)));
-  db.prepare(`INSERT INTO staff_days (day, user_id, seconds, duty_seconds, actions, sanctions, helps) VALUES (?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(day, user_id) DO UPDATE SET seconds = seconds + excluded.seconds, duty_seconds = duty_seconds + excluded.duty_seconds,
+  // Tiempo activo (cuenta para la cuota) y tiempo AFK (solo se muestra): el juego marca AFK a quien
+  // lleva más de 3 min sin moverse, sin escribir y sin usar comandos.
+  const active = p.afk ? 0 : secs, afk = p.afk ? secs : 0;
+  db.prepare(`INSERT INTO staff_days (day, user_id, seconds, afk_seconds, actions, sanctions, helps) VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(day, user_id) DO UPDATE SET seconds = seconds + excluded.seconds, afk_seconds = afk_seconds + excluded.afk_seconds,
       actions = actions + excluded.actions, sanctions = sanctions + excluded.sanctions, helps = helps + excluded.helps`)
-    .run(dayKey(now), p.userId, secs, p.duty ? secs : 0, num(a.total), num(a.sanctions), num(a.helps));
-  if (secs) db.prepare("INSERT INTO staff_hours (hour, user_id, seconds) VALUES (?, ?, ?) ON CONFLICT(hour, user_id) DO UPDATE SET seconds = seconds + excluded.seconds").run(hourKey(now), p.userId, secs);
+    .run(dayKey(now), p.userId, active, afk, num(a.total), num(a.sanctions), num(a.helps));
+  if (active) db.prepare("INSERT INTO staff_hours (hour, user_id, seconds) VALUES (?, ?, ?) ON CONFLICT(hour, user_id) DO UPDATE SET seconds = seconds + excluded.seconds").run(hourKey(now), p.userId, active);
   // Staff antiguo en el juego (etiqueta sin vincular en la página).
   if (tier > 0 && !linked) {
     const row = db.prepare("SELECT * FROM staff_legacy_game WHERE roblox_user_id = ?").get(p.userId);
@@ -363,7 +368,7 @@ function weeksOfMonth(month) {
 
 export function taskProgress(db, s, month, settings) {
   const { start, end, d0, d1 } = monthRange(month);
-  const days = s.roblox_user_id ? db.prepare(`SELECT COALESCE(SUM(seconds),0) AS secs, COALESCE(SUM(duty_seconds),0) AS duty, COALESCE(SUM(sanctions),0) AS sanctions,
+  const days = s.roblox_user_id ? db.prepare(`SELECT COALESCE(SUM(seconds),0) AS secs, COALESCE(SUM(afk_seconds),0) AS afk, COALESCE(SUM(sanctions),0) AS sanctions,
     COALESCE(SUM(actions),0) AS actions, COALESCE(SUM(helps),0) AS helps FROM staff_days WHERE user_id = ? AND day BETWEEN ? AND ?`).get(s.roblox_user_id, d0, d1) : {};
   // Días activos: ≥ 10 min en el juego o (si está activado) ≥ 10 min de actividad en Discord.
   const gameDays = s.roblox_user_id ? db.prepare("SELECT day FROM staff_days WHERE user_id = ? AND day BETWEEN ? AND ? AND seconds >= 600").all(s.roblox_user_id, d0, d1).map((r) => r.day) : [];
@@ -379,26 +384,34 @@ export function taskProgress(db, s, month, settings) {
   const weeks = weeksOfMonth(month).map((w) => weekStatus(db, settings, s, w));
   const auto = {
     weeks: weeks.filter((w) => w.met).length,
-    duty: Math.floor(((days.duty || 0) / 3600) * 10) / 10,
     days: activeDays.size,
     moderation: (days.sanctions || 0) + reportsFiled,
     reviews,
   };
   const rank = RANK_KEYS.includes(s.rank) ? s.rank : "Helper";
   const tasks = TASKS.map((t) => {
-    // La meta de semanas nunca pasa de las semanas que tiene el mes.
-    let target = settings.targets[t.key]?.[rank] ?? t.targets[rank] ?? 0;
-    if (t.key === "weeks") target = Math.min(target, weeks.length);
+    // min = cuota obligatoria, goal = meta opcional. Las semanas nunca pasan de las que tiene el mes.
+    let min = settings.targets[t.key]?.min?.[rank] ?? t.min[rank] ?? 0;
+    let goal = Math.max(min, settings.targets[t.key]?.goal?.[rank] ?? t.goal[rank] ?? 0);
+    if (t.key === "weeks") { min = Math.min(min, weeks.length); goal = Math.min(goal, weeks.length); }
     const value = t.track === "auto" ? auto[t.key] : ev[t.key]?.v || 0;
-    return { key: t.key, name: t.name, unit: t.unit, track: t.track, optional: !!t.optional, target, value, pending: ev[t.key]?.p || 0, done: target === 0 || value >= target };
-  }).filter((t) => t.target > 0);
-  const required = tasks.filter((t) => !t.optional);
+    return {
+      key: t.key, name: t.name, unit: t.unit, track: t.track, required: min > 0, optional: min === 0,
+      min, goal, target: min || goal, value, pending: ev[t.key]?.p || 0,
+      done: min === 0 || value >= min, goalDone: goal > 0 && value >= goal,
+    };
+  }).filter((t) => t.min > 0 || t.goal > 0);
+  const required = tasks.filter((t) => t.required);
+  const withGoal = tasks.filter((t) => t.goal > 0);
   const doneCount = required.filter((t) => t.done).length;
   const excuse = db.prepare("SELECT id, reason, reviewed_by AS reviewedBy FROM staff_excuses WHERE discord_id = ? AND scope = 'month' AND period = ? AND status = 'approved'").get(s.discord_id, month) || null;
   return {
     month, tasks, weeks, required: required.length, done: doneCount, complete: doneCount === required.length || Boolean(excuse), excused: Boolean(excuse), excuse,
-    percent: required.length ? Math.round(required.reduce((a, t) => a + Math.min(1, t.value / t.target), 0) / required.length * 100) : 100,
-    activity: { actions: days.actions || 0, helps: days.helps || 0, sanctions: days.sanctions || 0, reportsFiled, gameHours: round1((days.secs || 0) / 3600), discordHours: round1(Object.values(dByDay).reduce((x, y) => x + y, 0) / 60), discordMessages: discordMsgs },
+    percent: required.length ? Math.round(required.reduce((a, t) => a + Math.min(1, t.value / t.min), 0) / required.length * 100) : 100,
+    // Desempeño: % de las metas opcionales (cada tarea cuenta hasta 100 %). Sirve para pedir ascenso.
+    performance: withGoal.length ? Math.round(withGoal.reduce((a, t) => a + Math.min(1, t.value / t.goal), 0) / withGoal.length * 100) : 0,
+    goalsDone: withGoal.filter((t) => t.goalDone).length, goalsTotal: withGoal.length,
+    activity: { actions: days.actions || 0, helps: days.helps || 0, sanctions: days.sanctions || 0, reportsFiled, gameHours: round1((days.secs || 0) / 3600), afkHours: round1((days.afk || 0) / 3600), discordHours: round1(Object.values(dByDay).reduce((x, y) => x + y, 0) / 60), discordMessages: discordMsgs },
   };
 }
 
@@ -451,8 +464,9 @@ export function staffEvidenceQueue(db, actor) {
 }
 
 // Cierre de mes y avisos (cada 15 min junto con los creadores).
-// Al llegar al tope de meses sin cumplir no sale al instante: tiene excuseDays para presentar una
-// excusa. Si se la aprueban se le quita esa falta y sigue; si no, sale del staff.
+// Al llegar al tope de meses sin cumplir (2 por defecto) no baja al instante: tiene excuseDays para
+// presentar una excusa. Si se la aprueban se le quita esa falta y sigue; si no, BAJA UN RANGO
+// (Moderator → Moderator Jr → Helper → fuera del staff) y empieza de cero en el nuevo rango.
 export function evaluateStaff(db, cfg, now = Date.now()) {
   const settings = getStaffSettings(db, cfg);
   const R = settings.rules;
@@ -469,9 +483,9 @@ export function evaluateStaff(db, cfg, now = Date.now()) {
       if (fullMonth) {
         const p = taskProgress(db, s, prev, settings);
         strikes = p.complete ? 0 : strikes + 1;
-        db.prepare(`INSERT INTO staff_month_results (discord_id, month, percent, complete, excused, strike, evaluated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(discord_id, month) DO UPDATE SET percent = excluded.percent, complete = excluded.complete, excused = excluded.excused, strike = excluded.strike, evaluated_at = excluded.evaluated_at`)
-          .run(s.discord_id, prev, p.percent, p.complete ? 1 : 0, p.excused ? 1 : 0, p.complete ? 0 : 1, now);
+        db.prepare(`INSERT INTO staff_month_results (discord_id, month, percent, performance, complete, excused, strike, evaluated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(discord_id, month) DO UPDATE SET percent = excluded.percent, performance = excluded.performance, complete = excluded.complete, excused = excluded.excused, strike = excluded.strike, evaluated_at = excluded.evaluated_at`)
+          .run(s.discord_id, prev, p.percent, p.performance, p.complete ? 1 : 0, p.excused ? 1 : 0, p.complete ? 0 : 1, now);
       }
       db.prepare("UPDATE staff SET eval_month = ?, strikes = ? WHERE discord_id = ?").run(prev, strikes, s.discord_id);
       s = { ...s, eval_month: prev, strikes };
@@ -491,9 +505,12 @@ export function evaluateStaff(db, cfg, now = Date.now()) {
         db.prepare("UPDATE staff SET removal_due_at = NULL WHERE discord_id = ?").run(s.discord_id);
       } else if (now >= s.removal_due_at && !pendingExcuse) {
         db.prepare("UPDATE staff SET removal_due_at = NULL WHERE discord_id = ?").run(s.discord_id);
-        const job = setStaffRank(db, SYSTEM, s.discord_id, "None", "tasks", now);
-        if (job) { out.roleJobs.push(job); out.removed++; }
-        continue;
+        const lower = RANK_KEYS[rankIndex(s.rank) - 2] || "None"; // un rango menos; Helper → fuera
+        const job = setStaffRank(db, SYSTEM, s.discord_id, lower, lower === "None" ? "tasks" : "tareas sin cumplir", now);
+        db.prepare("UPDATE staff SET strikes = 0 WHERE discord_id = ?").run(s.discord_id);
+        if (job) { out.roleJobs.push(job); if (lower === "None") out.removed++; else out.demoted = (out.demoted || 0) + 1; }
+        if (lower === "None") continue;
+        s = getStaff(db, s.discord_id);
       }
     }
     // 3) Aviso a mitad de mes si va por debajo del porcentaje.
@@ -598,12 +615,15 @@ export function promotionStatus(db, settings, s, now = Date.now()) {
   const since = s.rank_changed_at || s.joined_at;
   const days = Math.floor((now - since) / DAY);
   const cur = taskProgress(db, s, monthOf(now), settings);
+  const last = db.prepare("SELECT performance FROM staff_month_results WHERE discord_id = ? AND evaluated_at >= ? ORDER BY month DESC LIMIT 1").get(s.discord_id, since);
+  const perf = Math.max(cur.performance, last?.performance || 0);
   const months = db.prepare("SELECT month, complete FROM staff_month_results WHERE discord_id = ? AND evaluated_at >= ? ORDER BY month DESC LIMIT ?").all(s.discord_id, since, Math.max(1, rule.completeMonths));
   let streak = 0;
   for (const r of months) { if (r.complete) streak++; else break; }
   const checks = [
     { label: `${rule.minDays} días en tu rango`, ok: days >= rule.minDays, detail: `llevas ${days}` },
-    { label: `${rule.minPercent} % de las tareas de este mes`, ok: cur.percent >= rule.minPercent, detail: `vas en ${cur.percent} %` },
+    { label: "Cuotas obligatorias cumplidas (este mes o el anterior)", ok: cur.complete || Boolean(months[0]?.complete), detail: `este mes vas en ${cur.percent} %` },
+    { label: `Desempeño de ${rule.minPerformance} % en las tareas opcionales`, ok: perf >= rule.minPerformance, detail: `tienes ${perf} % (este mes o el anterior)` },
   ];
   if (rule.completeMonths > 0) checks.push({ label: `${rule.completeMonths} mes(es) cumplidos seguidos`, ok: streak >= rule.completeMonths, detail: `tienes ${streak}` });
   if (s.strikes > 0) checks.push({ label: "Sin meses sin cumplir", ok: false, detail: `tienes ${s.strikes}` });
@@ -648,7 +668,7 @@ export function myStaffState(db, cfg, user, now = Date.now()) {
   const settings = getStaffSettings(db, cfg);
   const s = getStaff(db, user.id);
   const m = monthOf(now);
-  const base = { staff: s ? { rank: s.rank, linkStatus: s.link_status, legacy: !!s.legacy, roblox: s.roblox_user_id ? { userId: s.roblox_user_id, name: s.roblox_name } : null, joinedAt: s.joined_at, strikes: s.strikes } : null,
+  const base = { staff: s ? { rank: s.rank, linkStatus: s.link_status, legacy: !!s.legacy, roblox: s.roblox_user_id ? { userId: s.roblox_user_id, name: s.roblox_name } : null, joinedAt: s.joined_at, strikes: s.strikes, publicProfile: s.public_profile !== 0 } : null,
     application: myStaffApplication(db, user.id), discordRank: user.roles.staffDiscord, linkDeadline: cfg.staff.linkDeadline };
   if (!activeStaff(s)) return base;
   return {
@@ -678,15 +698,15 @@ export function staffDashboard(db, cfg, now = Date.now()) {
     const isActive = s.link_status === "approved" && RANK_KEYS.includes(s.rank);
     const prog = isActive ? taskProgress(db, s, m, settings) : null;
     const wk = isActive ? weekStatus(db, settings, s, weekOf(now), now) : null;
-    const t = s.roblox_user_id ? db.prepare("SELECT COALESCE(SUM(CASE WHEN day = ? THEN seconds END),0) AS today, COALESCE(SUM(seconds),0) AS week, COALESCE(SUM(duty_seconds),0) AS dutyWeek FROM staff_days WHERE user_id = ? AND day >= ?").get(today, s.roblox_user_id, week0) : {};
+    const t = s.roblox_user_id ? db.prepare("SELECT COALESCE(SUM(CASE WHEN day = ? THEN seconds END),0) AS today, COALESCE(SUM(seconds),0) AS week, COALESCE(SUM(afk_seconds),0) AS afkWeek FROM staff_days WHERE user_id = ? AND day >= ?").get(today, s.roblox_user_id, week0) : {};
     return {
       discordId: s.discord_id, discord: s.global_name ? `${s.global_name} (@${s.username})` : s.username ? `@${s.username}` : `#${s.discord_id}`,
       roblox: s.roblox_user_id ? { userId: s.roblox_user_id, name: s.roblox_name } : null,
       rank: s.rank, linkStatus: s.link_status, legacy: !!s.legacy, joinedAt: s.joined_at, strikes: s.strikes,
       gameRank: s.staff_tier ? RANK_KEYS[s.staff_tier - 1] : s.staff_tier === 0 ? "None" : null,
       online: Boolean(s.last_seen && s.last_seen > onlineCut), lastSeen: s.last_seen, level: s.level,
-      hoursToday: Math.round((t.today || 0) / 360) / 10, hoursWeek: Math.round((t.week || 0) / 360) / 10, dutyWeek: Math.round((t.dutyWeek || 0) / 360) / 10,
-      progress: prog ? { percent: prog.percent, done: prog.done, required: prog.required, complete: prog.complete, excused: prog.excused, tasks: prog.tasks, activity: prog.activity } : null,
+      hoursToday: Math.round((t.today || 0) / 360) / 10, hoursWeek: Math.round((t.week || 0) / 360) / 10, afkWeek: Math.round((t.afkWeek || 0) / 360) / 10,
+      progress: prog ? { percent: prog.percent, performance: prog.performance, done: prog.done, required: prog.required, complete: prog.complete, excused: prog.excused, tasks: prog.tasks, activity: prog.activity } : null,
       week: wk, removalDueAt: s.removal_due_at || null,
     };
   });

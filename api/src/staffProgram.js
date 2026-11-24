@@ -7,7 +7,6 @@ export const RANKS = [
     key: "Helper", name: "Helper", emoji: "🛟", color: "#38BDF8", tag: "HELPER",
     summary: "La puerta de entrada al staff: atiende a los jugadores, responde dudas y reporta problemas.",
     game: [
-      { cmd: ";Duty", desc: "Entras en servicio: aparece «STAFF ON DUTY» sobre tu cabeza y tus minutos cuentan para tus tareas." },
       { cmd: ";Report <jugador> <motivo>", desc: "Envía un reporte al panel de la página y avisa al staff conectado." },
       { cmd: ";sc <mensaje>", desc: "Chat privado del staff en todos los servidores." },
       { cmd: ";PlayerInfo <jugador>", desc: "Nivel, edad de la cuenta, etiquetas, nivel de creador y si está en este servidor." },
@@ -71,29 +70,39 @@ export const RANK_BY_KEY = Object.fromEntries(RANKS.map((r) => [r.key, r]));
 
 // Tareas mensuales para mantener el rango. track: "auto" (lo mide el juego o la página) o
 // "evidence" (el staff sube pruebas y un rango superior aprueba cuánto suma).
-// targets[rango] = meta del mes (0 = no se pide en ese rango). optional = suma, pero no es obligatoria.
+// targets[rango] = meta del mes (0 = no se pide en ese rango).
+// Cada tarea tiene, por rango:
+//   min  = cuota OBLIGATORIA del mes para mantener el rango (0 = no es obligatoria en ese rango).
+//   goal = meta OPCIONAL más alta: lo que pases de la cuota suma "desempeño", que cuenta para ascender.
+// Lo que depende de que haya trabajo (si nadie rompe reglas no hay sanciones; si un compañero atiende
+// todo el panel no quedan revisiones) es solo opcional. El Admin cambia los números en Ajustes.
 export const TASKS = [
-  { key: "weeks", name: "Semanas con la cuota cumplida", unit: "semanas", track: "auto", targets: { Helper: 3, ModeratorJr: 3, Moderator: 3 },
-    desc: "Semanas (lunes a domingo) en las que llegaste a tu cuota de conexión: horas en el juego + actividad en el Discord, con un mínimo en el juego." },
-  { key: "duty", name: "Horas en servicio", unit: "h", track: "auto", targets: { Helper: 4, ModeratorJr: 6, Moderator: 8 },
-    desc: "Horas con ;Duty activado ayudando en los servidores." },
-  { key: "days", name: "Días activos", unit: "días", track: "auto", targets: { Helper: 8, ModeratorJr: 10, Moderator: 12 },
-    desc: "Días distintos con al menos 10 minutos en el juego o escribiendo en el Discord." },
-  { key: "moderation", name: "Acciones de moderación", unit: "acciones", track: "auto", targets: { Helper: 5, ModeratorJr: 10, Moderator: 15 },
-    desc: "Warn, Mute, Kick, Jail, baneos y ;Report usados en el juego." },
-  { key: "reviews", name: "Revisiones en el panel", unit: "revisiones", track: "auto", targets: { Helper: 0, ModeratorJr: 8, Moderator: 15 },
-    desc: "Reportes resueltos, evidencias, solicitudes y bonos revisados en esta página." },
-  { key: "helps", name: "Ayudas a jugadores", unit: "ayudas", track: "evidence", targets: { Helper: 15, ModeratorJr: 15, Moderator: 10 },
-    desc: "Capturas de ayudar a alguien en Discord o en el juego (una evidencia puede sumar varias)." },
-  { key: "invites", name: "Invitaciones al Discord", unit: "personas", track: "evidence", targets: { Helper: 20, ModeratorJr: 10, Moderator: 0 },
-    desc: "Captura del contador de invitaciones de Discord (personas que entraron con tu enlace este mes)." },
-  { key: "event", name: "Evento de la comunidad", unit: "eventos", track: "evidence", targets: { Helper: 0, ModeratorJr: 0, Moderator: 1 },
-    desc: "Organizar o dirigir un evento (torneo, sorteo, mini evento con ;CreatorEvent). Sube capturas o el anuncio." },
-  { key: "bugs", name: "Bugs reportados", unit: "bugs", track: "evidence", optional: true, targets: { Helper: 3, ModeratorJr: 3, Moderator: 3 },
-    desc: "Extra: errores del juego con video o captura. No es obligatorio, pero cuenta para ascender." },
+  { key: "weeks", name: "Semanas con la cuota cumplida", unit: "semanas", track: "auto",
+    min: { Helper: 3, ModeratorJr: 3, Moderator: 3 }, goal: { Helper: 4, ModeratorJr: 4, Moderator: 4 },
+    desc: "Semanas (lunes a domingo) en las que llegaste a tu cuota de horas: tiempo activo en el juego (el AFK no cuenta) + actividad en el Discord. Puedes fallar una semana al mes." },
+  { key: "days", name: "Días activos", unit: "días", track: "auto",
+    min: { Helper: 8, ModeratorJr: 6, Moderator: 5 }, goal: { Helper: 16, ModeratorJr: 12, Moderator: 10 },
+    desc: "Días distintos con al menos 10 minutos activo en el juego o escribiendo en el Discord." },
+  { key: "helps", name: "Ayudas a jugadores", unit: "ayudas", track: "evidence",
+    min: { Helper: 3, ModeratorJr: 2, Moderator: 0 }, goal: { Helper: 10, ModeratorJr: 8, Moderator: 5 },
+    desc: "Capturas de ayudar a alguien en Discord o en el juego (una captura puede sumar varias ayudas)." },
+  { key: "moderation", name: "Acciones de moderación", unit: "acciones", track: "auto",
+    min: { Helper: 0, ModeratorJr: 0, Moderator: 0 }, goal: { Helper: 5, ModeratorJr: 8, Moderator: 10 },
+    desc: "Warn, Mute, Kick, Jail, baneos y ;Report en el juego. Solo opcional: si nadie rompe las reglas, no hace falta." },
+  { key: "reviews", name: "Revisiones en el panel", unit: "revisiones", track: "auto",
+    min: { Helper: 0, ModeratorJr: 0, Moderator: 0 }, goal: { Helper: 0, ModeratorJr: 5, Moderator: 10 },
+    desc: "Reportes, evidencias, excusas y solicitudes revisadas en el panel. Solo opcional: depende de cuántas lleguen." },
+  { key: "invites", name: "Invitaciones al Discord", unit: "personas", track: "evidence",
+    min: { Helper: 0, ModeratorJr: 0, Moderator: 0 }, goal: { Helper: 3, ModeratorJr: 2, Moderator: 1 },
+    desc: "Amigos que entraron al Discord con tu enlace este mes (captura del contador de invitaciones). Solo opcional." },
+  { key: "event", name: "Evento de la comunidad", unit: "eventos", track: "evidence",
+    min: { Helper: 0, ModeratorJr: 0, Moderator: 0 }, goal: { Helper: 0, ModeratorJr: 1, Moderator: 1 },
+    desc: "Organizar o ayudar en un evento (torneo, sorteo, mini evento con ;CreatorEvent). Sube capturas o el anuncio." },
+  { key: "bugs", name: "Bugs reportados", unit: "bugs", track: "evidence",
+    min: { Helper: 0, ModeratorJr: 0, Moderator: 0 }, goal: { Helper: 1, ModeratorJr: 1, Moderator: 1 },
+    desc: "Errores del juego con video o captura." },
 ];
 export const TASK_BY_KEY = Object.fromEntries(TASKS.map((t) => [t.key, t]));
-export const requiredTasks = (rank) => TASKS.filter((t) => !t.optional && (t.targets[rank] || 0) > 0);
 
 // Formulario para aplicar como Helper (preguntas del dueño). type: text | long | yesno.
 // Discord y Roblox no se preguntan: se vinculan (login con Discord + elegir la cuenta de Roblox).
@@ -130,11 +139,13 @@ export const RULES = [
   "Todo queda registrado (juego y página): los abusos se revisan y se sancionan.",
   "Los casos graves o dudosos se escalan al rango superior por ;sc o el canal de staff.",
   "¿No puedes cumplir una semana o un mes (exámenes, viaje, enfermedad)? Presenta una excusa en el panel: si la aprueban, no pierdes el rango.",
+  "Cada tarea tiene una cuota obligatoria (para mantener el rango) y una meta opcional más alta (para ascender).",
+  "Si pasas 2 meses seguidos sin cumplir las cuotas obligatorias, bajas un rango (un Helper sale del staff). Puedes volver a subir cumpliendo.",
 ];
 
 // settings = ajustes del Admin (staffSettings.js): metas, cuota semanal, Discord y reglas.
 export function publicStaffProgram(cfg, settings = null) {
-  const tasks = settings ? TASKS.map((t) => ({ ...t, targets: { ...t.targets, ...settings.targets[t.key] } })) : TASKS;
+  const tasks = settings ? TASKS.map((t) => ({ ...t, min: { ...t.min, ...settings.targets[t.key]?.min }, goal: { ...t.goal, ...settings.targets[t.key]?.goal } })) : TASKS;
   return {
     ranks: RANKS, tasks, questions: QUESTIONS, rules: RULES,
     weekly: settings?.weekly || null, discordCredit: settings ? { weight: settings.discord.weight, windowMinutes: settings.discord.windowMinutes, dailyCapMinutes: settings.discord.dailyCapMinutes, enabled: settings.discord.channels.length > 0 } : null,

@@ -4,6 +4,11 @@ import { RANKS, TASKS, RULES } from "../api/src/staffProgram.js";
 import { defaultStaffSettings } from "../api/src/staffSettings.js";
 // Valores por defecto (el Admin puede cambiarlos en el panel; el panel siempre muestra los actuales).
 const D = defaultStaffSettings({ staff: { failMonthsToRemove: 2, warnDay: 20, graceDays: 3 } });
+const cell = (t, rk) => {
+  const m = t.min[rk] || 0, g = t.goal[rk] || 0;
+  if (!m && !g) return "—";
+  return `${m ? `<span class="st-req">▲ ${m}</span>` : `<span class="st-opt">opcional</span>`}${g ? ` <span class="st-goal">★ ${g}</span>` : ""}`;
+};
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const rankCards = RANKS.map((r, i) => `
           <article class="st-rank st-rank--${r.key}">
@@ -21,7 +26,7 @@ const cmdBlocks = RANKS.map((r) => `
             <dl>${r.game.map((c) => `<dt><code>${esc(c.cmd)}</code></dt><dd>${esc(c.desc || "Incluido.")}</dd>`).join("")}</dl>
           </details>`).join("");
 const taskRows = TASKS.map((t) => `
-              <tr><th scope="row">${esc(t.name)}${t.optional ? " <span class=\"st-tag\">extra</span>" : ""}<span>${esc(t.desc)}</span></th>${RANKS.map((r) => `<td>${t.targets[r.key] ? `${t.targets[r.key]} ${esc(t.unit)}` : "—"}</td>`).join("")}<td>${t.track === "auto" ? "Automática" : "Con evidencia"}</td></tr>`).join("");
+              <tr><th scope="row">${esc(t.name)}<span>${esc(t.desc)}</span></th>${RANKS.map((r) => `<td>${cell(t, r.key)}</td>`).join("")}<td>${t.track === "auto" ? "Automática" : "Con evidencia"}</td></tr>`).join("");
 // (las metas de arriba son las de por defecto)
 const html = `<!doctype html>
 <html lang="es">
@@ -81,7 +86,7 @@ const html = `<!doctype html>
         <div class="cr-hero__art" aria-hidden="true">
           <img class="cr-hero__cover" src="/img/portada-sm.webp" width="560" height="560" alt="">
           <span class="sticker sticker--live">🛟 HELPER</span>
-          <span class="sticker sticker--views">;Duty</span>
+          <span class="sticker sticker--views">;Report</span>
           <span class="sticker sticker--vip">STAFF ON DUTY</span>
         </div>
       </div>
@@ -96,6 +101,24 @@ const html = `<!doctype html>
           <li class="flight__stop"><h3>Responde el formulario</h3><p>Preguntas sobre ti, tu horario y cómo actuarías en casos reales.</p></li>
           <li class="flight__stop"><h3>Un Moderator te aprueba</h3><p>Te escribe por Discord y te da el rol y la etiqueta HELPER. Llegan solos al juego.</p></li>
         </ol>
+      </div>
+    </section>
+
+    <!-- Staff (carrusel, /staff/staff.js) -->
+    <section class="cc st-cc" data-staff hidden aria-labelledby="sc-title">
+      <div class="wrap">
+        <div class="cc__head">
+          <div>
+            <h2 class="section-title" id="sc-title">Nuestro staff</h2>
+            <p class="section-lead">Ellos cuidan las islas. Si alguno está conectado, ¡entra a su servidor! <span class="cc__count"><span data-staff-online>0</span> conectados ahora</span></p>
+          </div>
+          <div class="cc__arrows">
+            <button class="cc__prev" type="button" aria-label="Ver staff anterior">‹</button>
+            <button class="cc__next" type="button" aria-label="Ver más staff">›</button>
+          </div>
+        </div>
+        <div class="cc__track" role="list" tabindex="0" aria-label="Staff de Sky Eggs"></div>
+        <p class="cc__cta"><a href="https://discord.gg/sTgtR7KdGQ" target="_blank" rel="noopener">¿Necesitas ayuda? Escríbele al staff en el Discord →</a></p>
       </div>
     </section>
 
@@ -118,7 +141,8 @@ const html = `<!doctype html>
     <section class="st-tasks" id="tareas" aria-labelledby="tareas-title">
       <div class="wrap">
         <h2 class="section-title" id="tareas-title">Tareas del mes</h2>
-        <p class="section-lead">Para mantener el rango cumples las tareas de tu rango cada mes. Las automáticas las mide el juego y la página; para las demás subes capturas al panel y un rango superior las aprueba. Si pasan <strong>2 meses seguidos</strong> sin cumplirlas, tienes 5 días para presentar una excusa; si no, sales del staff. El día 20 te avisamos si vas por debajo de la mitad.</p>
+        <p class="section-lead">Cada tarea tiene dos números: <strong>▲ la cuota obligatoria</strong>, para mantener tu rango, y <strong>★ la meta opcional</strong>, que muestra tu desempeño y te deja pedir ascenso. Lo que depende de que haya trabajo (sanciones, revisiones) es solo opcional: si nadie rompe las reglas, no te perjudica.</p>
+        <p class="section-lead">Si pasas <strong>2 meses seguidos</strong> sin las cuotas obligatorias, tienes 5 días para presentar una excusa; si no, <strong>bajas un rango</strong> (Moderator → Moderator Jr → Helper; un Helper sale del staff). Puedes volver a subir cumpliendo. El día 20 te avisamos si vas atrasado.</p>
         <div class="st-table">
           <table>
             <thead><tr><th scope="col">Tarea</th>${RANKS.map((r) => `<th scope="col">${r.emoji} ${esc(r.name)}</th>`).join("")}<th scope="col">Cómo se mide</th></tr></thead>
@@ -132,14 +156,14 @@ const html = `<!doctype html>
     <section class="st-commands" id="cuota" aria-labelledby="cuota-title">
       <div class="wrap">
         <h2 class="section-title" id="cuota-title">Cuota semanal: juego + Discord</h2>
-        <p class="section-lead">Cada semana (lunes a domingo) sumas horas de conexión. Cuenta el tiempo en el juego <strong>y</strong> el tiempo que pasas ayudando en el Discord: cada rato en el que escribes en los canales del staff suma minutos. Si ayudas mucho en Discord, se te piden menos horas en el juego, pero siempre hay un mínimo en el juego.</p>
+        <p class="section-lead">Cada semana (lunes a domingo) sumas horas de conexión. Cuenta el tiempo activo en el juego (no hace falta ningún comando; el AFK no suma) <strong>y</strong> el tiempo que pasas ayudando en el Discord: cada rato en el que escribes en los canales del staff suma minutos. Si ayudas mucho en Discord, se te piden menos horas en el juego, pero siempre hay un mínimo en el juego.</p>
         <div class="st-table">
           <table>
             <thead><tr><th scope="col">Rango</th><th scope="col">Horas por semana</th><th scope="col">Mínimo en el juego</th></tr></thead>
             <tbody>${RANKS.map((r) => `<tr><th scope="row">${r.emoji} ${esc(r.name)}</th><td>${String(D.weekly[r.key].hours).replace(".", ",")} h</td><td>${String(D.weekly[r.key].minGameHours).replace(".", ",")} h</td></tr>`).join("")}</tbody>
           </table>
         </div>
-        <p class="section-lead">Ejemplo de un Helper: 2 h escribiendo en Discord + 1 h en el juego = semana cumplida. Los valores pueden cambiar: los actuales siempre están en tu panel.</p>
+        <p class="section-lead">Ejemplo de un Helper (5 h): 2 h ayudando en Discord + 3 h activo en el juego = semana cumplida. El tiempo AFK no cuenta. Los valores pueden cambiar: los actuales siempre están en tu panel.</p>
       </div>
     </section>
 
@@ -154,11 +178,12 @@ const html = `<!doctype html>
       <div class="wrap">
         <h2 class="section-title" id="faq-title">Preguntas</h2>
         <details><summary>Ya soy Helper, Moderator Jr o Moderator, ¿tengo que aplicar?</summary><p>No. Entra al panel con Discord y vincula tu cuenta de Roblox antes del <strong>1 de diciembre de 2026</strong>. Si no lo haces, pierdes el rango en el juego y en Discord y tendrás que llenar el formulario de Helper.</p></details>
-        <details><summary>¿Cómo se cuentan mis horas?</summary><p>El juego avisa a la página cada minuto quién del staff está conectado. Las horas en servicio cuentan cuando activas <code>;Duty</code>.</p></details>
+        <details><summary>¿Cómo se cuentan mis horas?</summary><p>Con solo estar en el juego ya cuentan; no hace falta ningún comando. El tiempo AFK (más de 3 minutos sin moverte, sin escribir y sin usar comandos) no suma a la cuota. También cuenta lo que escribes en los canales del Discord.</p></details>
         <details><summary>¿Qué cuenta como acción de moderación?</summary><p><code>;Warn</code>, <code>;Mute</code>, <code>;Kick</code>, <code>;Jail</code>, los baneos y los <code>;Report</code> que envías. Úsalos solo cuando hacen falta: los abusos se revisan.</p></details>
         <details><summary>¿Cómo subo de rango?</summary><p>Cumple tus tareas y pide el ascenso desde el panel. A Moderator Jr lo aprueba un Moderator o el Admin; a Moderator, solo el Admin.</p></details>
         <details><summary>¿Cuenta lo que hago en Discord?</summary><p>Sí. Los mensajes en los canales del staff suman tiempo de conexión para tu cuota semanal y para los días activos. Solo se mira cuándo escribiste, nunca lo que escribiste.</p></details>
-        <details><summary>No voy a poder cumplir una semana o un mes, ¿pierdo el rango?</summary><p>No si avisas. Presenta una excusa en el panel (exámenes, viaje, enfermedad…). Si un rango superior la aprueba, esa semana cuenta como cumplida o ese mes no suma falta. Si llegas a 2 meses seguidos sin cumplir, tienes 5 días para presentar la excusa antes de salir del staff.</p></details>
+        <details><summary>No voy a poder cumplir una semana o un mes, ¿pierdo el rango?</summary><p>No si avisas. Presenta una excusa en el panel (exámenes, viaje, enfermedad…). Si un rango superior la aprueba, esa semana cuenta como cumplida o ese mes no suma falta. Si llegas a 2 meses seguidos sin cumplir, tienes 5 días para presentar la excusa antes de bajar un rango.</p></details>
+        <details><summary>¿Cómo subo de rango?</summary><p>Cumple tus cuotas obligatorias y llega a las metas opcionales (★) para tener buen desempeño. Con los días mínimos en tu rango, pídelo desde el panel.</p></details>
         <details><summary>Me rechazaron, ¿puedo volver a aplicar?</summary><p>Sí, 14 días después del rechazo.</p></details>
         <details><summary>¿Cómo reporto a un jugador?</summary><p>Cualquier jugador puede escribir <code>;Report &lt;jugador&gt; &lt;motivo&gt;</code> en el juego. El reporte llega al panel del staff.</p></details>
       </div>
@@ -178,6 +203,7 @@ const html = `<!doctype html>
       <p class="footer__legal"><a href="/">Volver a Sky Eggs</a> · <a href="/creadores/">Programa de creadores</a></p>
     </div>
   </footer>
+  <script src="/staff/staff.js?v=__ASSET_V__" defer></script>
 </body>
 </html>
 `;

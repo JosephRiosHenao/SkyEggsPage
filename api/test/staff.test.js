@@ -12,6 +12,8 @@ import { rolesForStaff, diagnoseBot, explainDiscordError } from "../src/discord.
 import { getStaffSettings, saveStaffSettings } from "../src/staffSettings.js";
 import { recordDiscordMessages } from "../src/discordActivity.js";
 import { homeFeed } from "../src/home.js";
+import { announce } from "../src/announce.js";
+import { publicStaff } from "../src/insights.js";
 import { weekOf } from "../src/creators.js";
 
 const ROLE = { admin: "1560889139375898775", moderator: "1563742282392543312", creator: "1561051688125730897" };
@@ -96,15 +98,17 @@ test("actividad del juego, tareas con evidencias y revisión por rango superior"
   let now = t;
   for (let i = 0; i < 120; i++) {
     now += 60_000;
-    play(db, c, 3001, "Helper_Activo", { staffTier: 1, duty: i < 60, staffActions: i === 5 ? { total: 4, sanctions: 3, helps: 1 } : null }, now);
+    play(db, c, 3001, "Helper_Activo", { staffTier: 1, afk: i >= 90, staffActions: i === 5 ? { total: 4, sanctions: 3, helps: 1 } : null }, now);
   }
   S.recordReport(db, { reporterId: 3001, reporterName: "Helper_Activo", targetId: 77, targetName: "Troll", reason: "insultos en el chat" }, now);
   let st = S.myStaffState(db, c, S.withStaffRoles(db, c, C.getDiscordUser(db, "30001"), now), now);
   const task = (k) => st.current.tasks.find((x) => x.key === k);
-  assert.equal(task("weeks").value, 0); // 2 h en la semana: no llega a la cuota de 3 h
-  assert.equal(st.week.gameHours, 2);
-  assert.equal(st.week.missingHours, 1);
-  assert.equal(task("duty").value, 1);
+  assert.equal(task("weeks").value, 0); // 1,5 h activo en la semana: no llega a la cuota de 5 h del Helper
+  assert.equal(st.week.gameHours, 1.5); // los 30 min AFK no cuentan…
+  assert.equal(st.current.activity.afkHours, 0.5); // …pero se muestran
+  assert.equal(st.week.missingHours, 3.5);
+  assert.equal(task("weeks").required, true);
+  assert.equal(task("moderation").required, false); // opcional: si nadie rompe reglas no hace falta
   assert.equal(task("moderation").value, 4); // 3 sanciones + 1 reporte
   assert.equal(task("reviews"), undefined); // los Helpers no tienen esa tarea
   // Evidencia de invitaciones: la revisa un rango superior
@@ -195,25 +199,28 @@ test("cuota semanal: Discord suma horas, con un mínimo en el juego; ajustes del
   let w = S.weekStatus(db, settings, s, weekOf(t), now);
   assert.equal(w.discordHours, 2); // tope diario de 120 min
   assert.equal(w.gameHours, 0.5);
-  assert.equal(w.requiredGameHours, 1); // 3 h − 2 h de Discord = 1 h (y el mínimo es 1 h)
+  assert.equal(w.requiredGameHours, 3); // 5 h − 2 h de Discord = 3 h (el mínimo es 2 h)
   assert.equal(w.met, false);
-  for (let i = 0; i < 31; i++) { now += 60_000; play(db, c, 6001, "Discordero", { staffTier: 1 }, now); }
+  for (let i = 0; i < 151; i++) { now += 60_000; play(db, c, 6001, "Discordero", { staffTier: 1 }, now); }
   w = S.weekStatus(db, settings, s, weekOf(t), now);
   assert.equal(w.met, true);
   // El Admin sube la cuota del Helper y el peso de Discord: deja de cumplir
   assert.throws(() => saveStaffSettings(db, c, actor("m", "moderator", "Moderator"), { settings: { weekly: { Helper: { hours: 6 } } } }), /admin_only/);
   assert.throws(() => saveStaffSettings(db, c, actor("adm", "admin"), { settings: { weekly: { Helper: { hours: 900 } } } }), /bad_settings/);
-  saveStaffSettings(db, c, actor("adm", "admin"), { settings: { weekly: { Helper: { hours: 6, minGameHours: 2 } }, discord: { channels: "123456789012345678" }, targets: { invites: { Helper: 5 } } } });
+  saveStaffSettings(db, c, actor("adm", "admin"), { settings: { weekly: { Helper: { hours: 8, minGameHours: 2 } }, discord: { channels: "123456789012345678" }, targets: { invites: { min: { Helper: 1 }, goal: { Helper: 5 } } } } });
   const s2 = getStaffSettings(db, c);
-  assert.equal(s2.weekly.Helper.hours, 6);
-  assert.equal(s2.targets.invites.Helper, 5);
+  assert.equal(s2.weekly.Helper.hours, 8);
+  assert.equal(s2.targets.invites.goal.Helper, 5);
   assert.deepEqual(s2.discord.channels, ["123456789012345678"]);
   assert.equal(S.weekStatus(db, s2, s, weekOf(t), now).met, false);
   assert.equal(C.auditList(db, 5).some((a) => a.action === "staff.settings"), true);
   // Días activos: los de Discord cuentan
   const p = S.taskProgress(db, s, "2026-11", s2);
   assert.equal(p.tasks.find((x) => x.key === "days").value, 1);
-  assert.equal(p.tasks.find((x) => x.key === "invites").target, 5);
+  const inv = p.tasks.find((x) => x.key === "invites");
+  assert.equal(inv.min, 1); // ahora es obligatoria con cuota 1 y meta opcional 5
+  assert.equal(inv.goal, 5);
+  assert.equal(inv.required, true);
 });
 
 test("excusas: quitan la falta y cancelan la salida; inicio con prioridades por rol", () => {
@@ -253,6 +260,65 @@ test("excusas: quitan la falta y cancelan la salida; inicio con prioridades por 
   const wk = S.submitExcuse(db, c, "70001", { scope: "week", reason: "Exámenes finales toda la semana, vuelvo el lunes." }, now);
   S.reviewExcuse(db, c, mod, { id: wk.id, action: "approve" }, now);
   assert.equal(S.weekStatus(db, getStaffSettings(db, c), S.getStaff(db, "70001"), weekOf(now), now).met, true);
+});
+
+test("2 meses sin cuotas obligatorias: baja un rango (no sale); ascenso por desempeño", () => {
+  const db = openDb(":memory:"); const c = cfg(); const t = Date.parse("2026-10-20T10:00:00-05:00");
+  play(db, c, 8001, "Jefe_Mod", {}, t); user(db, "80001");
+  const app = S.submitStaffApplication(db, "80001", { robloxUserId: 8001, answers: answers(), age13: true }, t);
+  S.reviewStaffApplication(db, actor("adm", "admin"), { id: app.id, action: "approve" }, t);
+  S.changeStaffRank(db, actor("adm", "admin"), { discordId: "80001", rank: "Moderator" }, t);
+  deliverAll(db);
+  S.evaluateStaff(db, c, Date.parse("2026-12-04T10:00:00-05:00"));
+  S.evaluateStaff(db, c, Date.parse("2027-01-04T10:00:00-05:00"));
+  const out = S.evaluateStaff(db, c, Date.parse("2027-01-10T10:00:00-05:00"));
+  assert.equal(out.removed, 0);
+  assert.equal(out.demoted, 1);
+  const s = S.getStaff(db, "80001");
+  assert.equal(s.rank, "ModeratorJr");
+  assert.equal(s.strikes, 0); // empieza de cero en el nuevo rango
+  assert.ok(pend(db, 8001).includes("staffset:ModeratorJr"));
+  // Ascenso: no lo puede pedir sin días en el rango ni desempeño
+  const st = S.promotionStatus(db, getStaffSettings(db, c), s, Date.parse("2027-01-10T10:00:00-05:00"));
+  assert.equal(st.next, "Moderator");
+  assert.equal(st.eligible, false);
+  assert.ok(st.checks.some((x) => /Desempeño/.test(x.label) && !x.ok));
+});
+
+test("anuncios en Discord: menciona al rango, espacia las menciones y respeta los ajustes", async () => {
+  const db = openDb(":memory:"); const c = cfg(); c.discord.announceChannel = "1566631711910133860";
+  const sent = [];
+  const fake = async (url, init) => { sent.push({ url, body: JSON.parse(init.body) }); return { ok: true, status: 200, json: async () => ({}) }; };
+  const t = Date.now();
+  await announce(db, c, "creator_application", { text: "Nueva solicitud" }, fake, t);
+  await announce(db, c, "creator_application", { text: "Otra solicitud" }, fake, t + 60_000);
+  assert.match(sent[0].url, /channels\/1566631711910133860\/messages/);
+  assert.match(sent[0].body.content, /^<@&1563736465522036736> Nueva solicitud/); // rol Moderator
+  assert.deepEqual(sent[0].body.allowed_mentions.roles, ["1563736465522036736"]);
+  assert.equal(sent[1].body.content, "Otra solicitud"); // a los 1 min: sin mención
+  await announce(db, c, "staff_excuse", { text: "Excusa", auto: ["ModeratorJr", "Moderator"] }, fake, t);
+  assert.deepEqual(sent[2].body.allowed_mentions.roles, ["1563736116300087337", "1563736465522036736"]);
+  saveStaffSettings(db, c, actor("adm", "admin"), { settings: { announce: { events: { game_report: { on: false } } } } });
+  const r = await announce(db, c, "game_report", { text: "Reporte" }, fake, t);
+  assert.equal(r.sent, false);
+  assert.equal(sent.length, 3);
+});
+
+test("staff público: conectados primero y enlace a su servidor", async () => {
+  const db = openDb(":memory:"); const c = cfg(); const t = Date.now();
+  for (const [uid, did, rank] of [[9001, "90001", "Helper"], [9002, "90002", "Moderator"]]) {
+    play(db, c, uid, `Staff_${uid}`, {}, t - 3_600_000); user(db, did);
+    const app = S.submitStaffApplication(db, did, { robloxUserId: uid, answers: answers(), age13: true }, t - 3_600_000);
+    S.reviewStaffApplication(db, actor("adm", "admin"), { id: app.id, action: "approve" }, t - 3_600_000);
+    if (rank !== "Helper") S.changeStaffRank(db, actor("adm", "admin"), { discordId: did, rank }, t - 3_600_000);
+  }
+  gamePull(db, c, { jobId: "abcd1234-0000-1111-2222-333344445555", players: [{ userId: 9001, name: "Staff_9001", level: 20, staffTier: 1 }] }, t - 30_000);
+  const out = await publicStaff(db, c, async () => ({ ok: false, status: 500, json: async () => ({}) }), t);
+  assert.equal(out.online, 1);
+  assert.equal(out.staff[0].username, "Staff_9001");
+  assert.match(out.staff[0].joinUrl, /gameInstanceId=abcd1234-0000-1111-2222-333344445555/);
+  assert.equal(out.staff[1].joinUrl, null);
+  assert.equal(out.staff[1].seen, "today");
 });
 
 test("diagnóstico del bot: explica el 404 de Discord", async () => {

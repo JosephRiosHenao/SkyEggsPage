@@ -352,3 +352,23 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px
 .sticky-actions { position: sticky; bottom: 0; z-index: 4; padding: .8rem 1rem; border: 1px solid var(--border); border-radius: var(--radius); background: color-mix(in srgb, var(--surface-1) 92%, transparent); backdrop-filter: blur(8px); box-shadow: var(--shadow); }
 .tbl tbody th { text-transform: none; letter-spacing: 0; font-size: .9rem; color: var(--text-primary); background: transparent; position: static; font-weight: 650; }
 .tbl tbody th .small { font-weight: 500; }
+
+/* ---------- Cuota obligatoria + meta ---------- */
+.meter--goal { position: relative; overflow: visible; }
+.meter__min { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--text-primary); border-radius: 2px; }
+.task__marks { display: flex; flex-wrap: wrap; gap: .35rem; margin: .2rem 0 .3rem; }
+.mark { font-size: .74rem; font-weight: 700; padding: .05rem .5rem; border-radius: 999px; background: var(--surface-2); color: var(--text-secondary); }
+.mark--req { background: var(--warn-soft); color: var(--warn); }
+.mark--req.ok { background: var(--good-soft); color: var(--good); }
+.mark--goal { background: var(--accent-soft); color: var(--accent); }
+.mark--goal.ok { background: var(--accent); color: #fff; }
+.task.is-goal { border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
+.task.is-goal .meter__fill { background: var(--accent); }
+.pair { display: flex; gap: .4rem; }
+.pair__item { display: grid; gap: .15rem; font-size: .72rem; color: var(--text-muted); font-weight: 700; }
+.pair .num { width: 70px; }
+.chips { display: flex; flex-wrap: wrap; gap: .35rem; }
+.chip { display: inline-flex; align-items: center; gap: .3rem; padding: .15rem .55rem; border: 1px solid var(--border); border-radius: 999px; font-size: .82rem; background: var(--surface-1); cursor: pointer; }
+.chip input { margin: 0; }
+.form label.chip { display: inline-flex; flex-direction: row; font-weight: 600; color: var(--text-primary); }
+.chip input { width: auto; min-height: 0; }

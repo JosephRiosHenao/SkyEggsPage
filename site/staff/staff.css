@@ -32,3 +32,16 @@
   .st-cmds dl { grid-template-columns: 1fr; }
   .st-cmds dd { margin-bottom: .5rem; }
 }
+
+/* Carrusel del staff */
+.st-cc { background: linear-gradient(180deg, #EEF3FF, #fff); }
+.st-card__pic { position: relative; }
+.st-card__dot { position: absolute; right: 4px; bottom: 4px; width: 20px; height: 20px; border-radius: 50%; background: #B8C1DA; border: 3px solid var(--blanco); }
+.st-card.is-online .st-card__dot { background: #22C55E; box-shadow: 0 0 0 3px rgba(34, 197, 94, .35); }
+.st-card__status { margin-top: .35rem; font-size: var(--t-sm); font-weight: 700; color: var(--tinta-suave); }
+.st-card__status.is-online { color: #15803D; }
+.st-card__join { margin: .6rem 0 .3rem; }
+.st-req, .st-opt, .st-goal { display: inline-block; padding: 0 .45rem; border-radius: 999px; font-size: .82rem; }
+.st-req { background: #FFE7B3; }
+.st-opt { background: #EEF0F6; font-weight: 600; }
+.st-goal { background: #DCEBFF; }
