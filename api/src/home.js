@@ -28,7 +28,7 @@ export function homeFeed(db, cfg, user, actor, now = Date.now()) {
   if (r.staffLinked) {
     me = S.myStaffState(db, cfg, user, now);
     const w = me.week, cur = me.current;
-    if (me.removalDueAt) add(1, "⛔", "Vas a salir del staff", `No cumpliste ${me.staff.strikes} mes(es) seguidos. Presenta una excusa antes del ${fmtDate(me.removalDueAt)} si tuviste un motivo.`, "staff-excusas");
+    if (me.removalDueAt) add(1, "⛔", me.staff.rank === "Helper" ? "Vas a salir del staff" : "Vas a bajar de rango", `No cumpliste las cuotas obligatorias ${me.staff.strikes} meses seguidos. Si tuviste un motivo, presenta una excusa antes del ${fmtDate(me.removalDueAt)}.`, "staff-excusas");
     for (const x of me.excuses.filter((e) => e.status === "rejected" && now - e.createdAt < 7 * DAY)) add(2, "📝", "Tu excusa fue rechazada", x.reviewNote || "Revisa el motivo.", "staff-excusas");
     if (!w.met) {
       const dow = (new Date(now + OFFSET_MS).getUTCDay() + 6) % 7; // 0 = lunes
@@ -39,11 +39,11 @@ export function homeFeed(db, cfg, user, actor, now = Date.now()) {
         `Llevas ${n1(w.totalHours)} de ${n1(w.targetHours)} h (${n1(w.gameHours)} h en el juego + ${n1(w.discordHours)} h en Discord). ${w.missingGameHours > 0 ? `Te faltan ${n1(w.missingGameHours)} h en el juego. ` : ""}Quedan ${left} día(s).`, "staff-tareas");
     }
     const dom = Number(new Date(now + OFFSET_MS).toISOString().slice(8, 10));
-    if (!cur.complete && dom >= 15 && cur.percent < 60) add(dom >= settings.rules.warnDay ? 1 : 2, "📉", `Tareas del mes al ${cur.percent} %`, `${cur.done}/${cur.required} cumplidas. Sube evidencias o pide una excusa si no vas a poder.`, "staff-tareas");
+    if (!cur.complete && dom >= 15 && cur.percent < 60) add(dom >= settings.rules.warnDay ? 1 : 2, "📉", `Cuotas obligatorias al ${cur.percent} %`, `${cur.done}/${cur.required} cumplidas. Sube evidencias o presenta una excusa si no vas a poder.`, "staff-tareas");
     const pendingEv = cur.tasks.reduce((a, t) => a + (t.pending || 0), 0);
     if (pendingEv) add(3, "⏳", "Evidencias en revisión", `${pendingEv} esperando a un rango superior.`, "staff-tareas");
     if (me.promotion.next && me.promotion.eligible && !me.promotions.some((p) => p.status === "pending")) add(2, "⬆️", `Puedes pedir ascenso a ${me.promotion.next === "ModeratorJr" ? "Moderator Jr" : "Moderator"}`, "Cumples los requisitos.", "staff-tareas");
-    if (me.staff.strikes > 0 && !me.removalDueAt) add(2, "⚠️", `${me.staff.strikes} mes(es) sin cumplir`, `Con ${settings.rules.failMonthsToRemove} seguidos sales del staff.`, "staff-tareas");
+    if (me.staff.strikes > 0 && !me.removalDueAt) add(2, "⚠️", `${me.staff.strikes} mes(es) sin cumplir`, `Con ${settings.rules.failMonthsToRemove} seguidos bajas un rango${me.staff.rank === "Helper" ? " (sales del staff)" : ""}.`, "staff-tareas");
   }
 
   // ----- Colas de revisión -----
@@ -99,5 +99,5 @@ export function homeFeed(db, cfg, user, actor, now = Date.now()) {
       onlineNow: d.members.filter((m) => m.online).map((m) => ({ name: m.roblox?.name || m.discord, rank: m.rank })) };
   })() : null;
 
-  return { items, quick, me: me ? { rank: me.staff.rank, week: me.week, month: { percent: me.current.percent, done: me.current.done, required: me.current.required, complete: me.current.complete, excused: me.current.excused }, promotion: me.promotion, strikes: me.staff.strikes } : null, team };
+  return { items, quick, me: me ? { rank: me.staff.rank, week: me.week, month: { percent: me.current.percent, performance: me.current.performance, done: me.current.done, required: me.current.required, complete: me.current.complete, excused: me.current.excused }, promotion: me.promotion, strikes: me.staff.strikes } : null, team };
 }

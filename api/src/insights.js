@@ -125,3 +125,33 @@ export function creatorDetail(db, discordId, now = Date.now()) {
       FROM notices n LEFT JOIN rewards r ON r.id = n.reward_id WHERE n.roblox_user_id = ? ORDER BY n.id DESC LIMIT 30`).all(c.roblox_user_id) : [],
   };
 }
+
+// ---------- Staff público (/staff/): quién es, su rango y si está conectado ----------
+// Avatar, nombres de Roblox y rango; "en línea" si el juego lo vio en los últimos 3 min. joinUrl abre
+// el juego en su servidor (solo si está en línea y conocemos el servidor). Nada de Discord ni horas.
+let staffCache = { at: 0, body: null, pics: new Map(), picsAt: 0 };
+const PLACE_ID = 77372347150746;
+export async function publicStaff(db, cfg, fetchImpl, now = Date.now()) {
+  if (staffCache.body && now - staffCache.at < 60_000) return staffCache.body;
+  const rows = db.prepare(`SELECT s.roblox_user_id, s.roblox_name, s.roblox_display, s.rank, p.last_seen, p.job_id
+    FROM staff s LEFT JOIN players p ON p.user_id = s.roblox_user_id
+    WHERE s.link_status = 'approved' AND s.rank != 'None' AND s.public_profile != 0 AND s.roblox_user_id IS NOT NULL`).all();
+  if (now - staffCache.picsAt > 30 * 60_000) {
+    try { staffCache.pics = await avatars(rows.map((r) => r.roblox_user_id).slice(0, 100), { fetchImpl, timeoutMs: cfg.robloxTimeoutMs }); staffCache.picsAt = now; } catch { /* sin fotos */ }
+  }
+  const ORDER = { Moderator: 3, ModeratorJr: 2, Helper: 1 };
+  const staff = rows.map((r) => {
+    const online = Boolean(r.last_seen && now - r.last_seen < 3 * 60_000);
+    const job = online && r.job_id && /^[A-Za-z0-9-]{8,64}$/.test(r.job_id) ? r.job_id : null;
+    const ago = r.last_seen ? now - r.last_seen : null;
+    return {
+      name: r.roblox_display || r.roblox_name, username: r.roblox_name, userId: r.roblox_user_id,
+      avatar: staffCache.pics.get(r.roblox_user_id) || null, rank: r.rank, online,
+      // Aproximado a propósito: "hoy", "esta semana"…
+      seen: online ? "now" : ago == null ? null : ago < 86_400_000 ? "today" : ago < 7 * 86_400_000 ? "week" : "older",
+      joinUrl: job ? `https://www.roblox.com/games/start?placeId=${PLACE_ID}&gameInstanceId=${encodeURIComponent(job)}` : null,
+    };
+  }).sort((a, b) => Number(b.online) - Number(a.online) || ORDER[b.rank] - ORDER[a.rank] || a.name.localeCompare(b.name));
+  staffCache = { ...staffCache, at: now, body: { staff, online: staff.filter((x) => x.online).length, updatedAt: now } };
+  return staffCache.body;
+}

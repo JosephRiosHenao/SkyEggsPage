@@ -48,7 +48,8 @@ No tocar otros contenedores ni la configuración de un Traefik existente sin con
 
 - Rangos Helper → ModeratorJr → Moderator (roles de Discord en `config.discord.staffRoles`). Reglas en `api/src/staff.js`; rangos, comandos, tareas y preguntas del formulario en `api/src/staffProgram.js` (fuente única para la API, el panel y `/staff/`).
 - `site/staff/index.html` se genera con `node scripts/build-staff-page.mjs`: no editarla a mano.
-- Ajustes que cambia el Admin (metas, cuota semanal juego + Discord, ascensos, excusas): `api/src/staffSettings.js` (tabla `settings`). Actividad en Discord por REST: `api/src/discordActivity.js`. Inicio por rol: `api/src/home.js`.
+- Ajustes que cambia el Admin (metas, cuota semanal juego + Discord, ascensos, excusas): `api/src/staffSettings.js` (tabla `settings`). Actividad en Discord por REST: `api/src/discordActivity.js`. Inicio por rol: `api/src/home.js`. Anuncios con mención en el canal del staff: `api/src/announce.js`. Carrusel de `/staff/`: `site/staff/staff.js` + `GET /api/staff/public`.
+- Tareas: cuota obligatoria (`min`) + meta opcional (`goal`) por rango; 2 meses sin cuotas = baja un rango. Sin `;Duty`: cuenta el tiempo conectado menos el AFK.
 - Juego: kind `staffset` en `WebRewardService`, `StaffActivity` (cuenta comandos y `;Duty`) y `Config.Commands.StaffTools` (`;Report`, `;sc`, `;Duty`, `;PlayerInfo`, `;StaffHelp`). Los comandos de cada rango viven en `Config.Roles` de HD Admin; si cambian, actualizar `staffProgram.js` y regenerar la página.
 - Panel: barra lateral en `site/creadores/panel/` (`navGroups()` en `panel.js`); "Prueba tu suerte" se incrusta desde `/admin/?embed=1`.
 

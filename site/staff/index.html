@@ -56,7 +56,7 @@
         <div class="cr-hero__art" aria-hidden="true">
           <img class="cr-hero__cover" src="/img/portada-sm.webp" width="560" height="560" alt="">
           <span class="sticker sticker--live">🛟 HELPER</span>
-          <span class="sticker sticker--views">;Duty</span>
+          <span class="sticker sticker--views">;Report</span>
           <span class="sticker sticker--vip">STAFF ON DUTY</span>
         </div>
       </div>
@@ -71,6 +71,24 @@
           <li class="flight__stop"><h3>Responde el formulario</h3><p>Preguntas sobre ti, tu horario y cómo actuarías en casos reales.</p></li>
           <li class="flight__stop"><h3>Un Moderator te aprueba</h3><p>Te escribe por Discord y te da el rol y la etiqueta HELPER. Llegan solos al juego.</p></li>
         </ol>
+      </div>
+    </section>
+
+    <!-- Staff (carrusel, /staff/staff.js) -->
+    <section class="cc st-cc" data-staff hidden aria-labelledby="sc-title">
+      <div class="wrap">
+        <div class="cc__head">
+          <div>
+            <h2 class="section-title" id="sc-title">Nuestro staff</h2>
+            <p class="section-lead">Ellos cuidan las islas. Si alguno está conectado, ¡entra a su servidor! <span class="cc__count"><span data-staff-online>0</span> conectados ahora</span></p>
+          </div>
+          <div class="cc__arrows">
+            <button class="cc__prev" type="button" aria-label="Ver staff anterior">‹</button>
+            <button class="cc__next" type="button" aria-label="Ver más staff">›</button>
+          </div>
+        </div>
+        <div class="cc__track" role="list" tabindex="0" aria-label="Staff de Sky Eggs"></div>
+        <p class="cc__cta"><a href="https://discord.gg/sTgtR7KdGQ" target="_blank" rel="noopener">¿Necesitas ayuda? Escríbele al staff en el Discord →</a></p>
       </div>
     </section>
 
@@ -116,7 +134,7 @@
         <p class="section-lead">Escríbelos en el chat del juego o en la barra de comandos de HD Admin. Todo lo que haces queda registrado.</p>
           <details class="st-cmds st-cmds--Helper" open>
             <summary>🛟 Comandos de Helper</summary>
-            <dl><dt><code>;Duty</code></dt><dd>Entras en servicio: aparece «STAFF ON DUTY» sobre tu cabeza y tus minutos cuentan para tus tareas.</dd><dt><code>;Report &lt;jugador&gt; &lt;motivo&gt;</code></dt><dd>Envía un reporte al panel de la página y avisa al staff conectado.</dd><dt><code>;sc &lt;mensaje&gt;</code></dt><dd>Chat privado del staff en todos los servidores.</dd><dt><code>;PlayerInfo &lt;jugador&gt;</code></dt><dd>Nivel, edad de la cuenta, etiquetas, nivel de creador y si está en este servidor.</dd><dt><code>;Warn &lt;jugador&gt; &lt;motivo&gt;</code></dt><dd>Advertencia oficial (queda en el historial de HD Admin).</dd><dt><code>;Mute &lt;jugador&gt;</code></dt><dd>Silencia el chat de un jugador que insulta o hace spam.</dd><dt><code>;View, ;GoTo, ;Follow</code></dt><dd>Ver desde un jugador, ir a su lado o seguirlo para ayudarlo.</dd><dt><code>;PrivateMessage &lt;jugador&gt; &lt;mensaje&gt;</code></dt><dd>Mensaje privado oficial.</dd><dt><code>;WhoIs, ;Ping, ;HideGuis, ;Emotes, ;Dance</code></dt><dd>Información, ping, capturas sin interfaz y emotes.</dd><dt><code>;StaffHelp</code></dt><dd>Tus comandos y la guía, dentro del juego.</dd></dl>
+            <dl><dt><code>;Report &lt;jugador&gt; &lt;motivo&gt;</code></dt><dd>Envía un reporte al panel de la página y avisa al staff conectado.</dd><dt><code>;sc &lt;mensaje&gt;</code></dt><dd>Chat privado del staff en todos los servidores.</dd><dt><code>;PlayerInfo &lt;jugador&gt;</code></dt><dd>Nivel, edad de la cuenta, etiquetas, nivel de creador y si está en este servidor.</dd><dt><code>;Warn &lt;jugador&gt; &lt;motivo&gt;</code></dt><dd>Advertencia oficial (queda en el historial de HD Admin).</dd><dt><code>;Mute &lt;jugador&gt;</code></dt><dd>Silencia el chat de un jugador que insulta o hace spam.</dd><dt><code>;View, ;GoTo, ;Follow</code></dt><dd>Ver desde un jugador, ir a su lado o seguirlo para ayudarlo.</dd><dt><code>;PrivateMessage &lt;jugador&gt; &lt;mensaje&gt;</code></dt><dd>Mensaje privado oficial.</dd><dt><code>;WhoIs, ;Ping, ;HideGuis, ;Emotes, ;Dance</code></dt><dd>Información, ping, capturas sin interfaz y emotes.</dd><dt><code>;StaffHelp</code></dt><dd>Tus comandos y la guía, dentro del juego.</dd></dl>
           </details>
           <details class="st-cmds st-cmds--ModeratorJr">
             <summary>🛡️ Comandos de Moderator Jr</summary>
@@ -132,20 +150,20 @@
     <section class="st-tasks" id="tareas" aria-labelledby="tareas-title">
       <div class="wrap">
         <h2 class="section-title" id="tareas-title">Tareas del mes</h2>
-        <p class="section-lead">Para mantener el rango cumples las tareas de tu rango cada mes. Las automáticas las mide el juego y la página; para las demás subes capturas al panel y un rango superior las aprueba. Si pasan <strong>2 meses seguidos</strong> sin cumplirlas, tienes 5 días para presentar una excusa; si no, sales del staff. El día 20 te avisamos si vas por debajo de la mitad.</p>
+        <p class="section-lead">Cada tarea tiene dos números: <strong>▲ la cuota obligatoria</strong>, para mantener tu rango, y <strong>★ la meta opcional</strong>, que muestra tu desempeño y te deja pedir ascenso. Lo que depende de que haya trabajo (sanciones, revisiones) es solo opcional: si nadie rompe las reglas, no te perjudica.</p>
+        <p class="section-lead">Si pasas <strong>2 meses seguidos</strong> sin las cuotas obligatorias, tienes 5 días para presentar una excusa; si no, <strong>bajas un rango</strong> (Moderator → Moderator Jr → Helper; un Helper sale del staff). Puedes volver a subir cumpliendo. El día 20 te avisamos si vas atrasado.</p>
         <div class="st-table">
           <table>
             <thead><tr><th scope="col">Tarea</th><th scope="col">🛟 Helper</th><th scope="col">🛡️ Moderator Jr</th><th scope="col">⚔️ Moderator</th><th scope="col">Cómo se mide</th></tr></thead>
             <tbody>
-              <tr><th scope="row">Semanas con la cuota cumplida<span>Semanas (lunes a domingo) en las que llegaste a tu cuota de conexión: horas en el juego + actividad en el Discord, con un mínimo en el juego.</span></th><td>3 semanas</td><td>3 semanas</td><td>3 semanas</td><td>Automática</td></tr>
-              <tr><th scope="row">Horas en servicio<span>Horas con ;Duty activado ayudando en los servidores.</span></th><td>4 h</td><td>6 h</td><td>8 h</td><td>Automática</td></tr>
-              <tr><th scope="row">Días activos<span>Días distintos con al menos 10 minutos en el juego o escribiendo en el Discord.</span></th><td>8 días</td><td>10 días</td><td>12 días</td><td>Automática</td></tr>
-              <tr><th scope="row">Acciones de moderación<span>Warn, Mute, Kick, Jail, baneos y ;Report usados en el juego.</span></th><td>5 acciones</td><td>10 acciones</td><td>15 acciones</td><td>Automática</td></tr>
-              <tr><th scope="row">Revisiones en el panel<span>Reportes resueltos, evidencias, solicitudes y bonos revisados en esta página.</span></th><td>—</td><td>8 revisiones</td><td>15 revisiones</td><td>Automática</td></tr>
-              <tr><th scope="row">Ayudas a jugadores<span>Capturas de ayudar a alguien en Discord o en el juego (una evidencia puede sumar varias).</span></th><td>15 ayudas</td><td>15 ayudas</td><td>10 ayudas</td><td>Con evidencia</td></tr>
-              <tr><th scope="row">Invitaciones al Discord<span>Captura del contador de invitaciones de Discord (personas que entraron con tu enlace este mes).</span></th><td>20 personas</td><td>10 personas</td><td>—</td><td>Con evidencia</td></tr>
-              <tr><th scope="row">Evento de la comunidad<span>Organizar o dirigir un evento (torneo, sorteo, mini evento con ;CreatorEvent). Sube capturas o el anuncio.</span></th><td>—</td><td>—</td><td>1 eventos</td><td>Con evidencia</td></tr>
-              <tr><th scope="row">Bugs reportados <span class="st-tag">extra</span><span>Extra: errores del juego con video o captura. No es obligatorio, pero cuenta para ascender.</span></th><td>3 bugs</td><td>3 bugs</td><td>3 bugs</td><td>Con evidencia</td></tr>
+              <tr><th scope="row">Semanas con la cuota cumplida<span>Semanas (lunes a domingo) en las que llegaste a tu cuota de horas: tiempo activo en el juego (el AFK no cuenta) + actividad en el Discord. Puedes fallar una semana al mes.</span></th><td><span class="st-req">▲ 3</span> <span class="st-goal">★ 4</span></td><td><span class="st-req">▲ 3</span> <span class="st-goal">★ 4</span></td><td><span class="st-req">▲ 3</span> <span class="st-goal">★ 4</span></td><td>Automática</td></tr>
+              <tr><th scope="row">Días activos<span>Días distintos con al menos 10 minutos activo en el juego o escribiendo en el Discord.</span></th><td><span class="st-req">▲ 8</span> <span class="st-goal">★ 16</span></td><td><span class="st-req">▲ 6</span> <span class="st-goal">★ 12</span></td><td><span class="st-req">▲ 5</span> <span class="st-goal">★ 10</span></td><td>Automática</td></tr>
+              <tr><th scope="row">Ayudas a jugadores<span>Capturas de ayudar a alguien en Discord o en el juego (una captura puede sumar varias ayudas).</span></th><td><span class="st-req">▲ 3</span> <span class="st-goal">★ 10</span></td><td><span class="st-req">▲ 2</span> <span class="st-goal">★ 8</span></td><td><span class="st-opt">opcional</span> <span class="st-goal">★ 5</span></td><td>Con evidencia</td></tr>
+              <tr><th scope="row">Acciones de moderación<span>Warn, Mute, Kick, Jail, baneos y ;Report en el juego. Solo opcional: si nadie rompe las reglas, no hace falta.</span></th><td><span class="st-opt">opcional</span> <span class="st-goal">★ 5</span></td><td><span class="st-opt">opcional</span> <span class="st-goal">★ 8</span></td><td><span class="st-opt">opcional</span> <span class="st-goal">★ 10</span></td><td>Automática</td></tr>
+              <tr><th scope="row">Revisiones en el panel<span>Reportes, evidencias, excusas y solicitudes revisadas en el panel. Solo opcional: depende de cuántas lleguen.</span></th><td>—</td><td><span class="st-opt">opcional</span> <span class="st-goal">★ 5</span></td><td><span class="st-opt">opcional</span> <span class="st-goal">★ 10</span></td><td>Automática</td></tr>
+              <tr><th scope="row">Invitaciones al Discord<span>Amigos que entraron al Discord con tu enlace este mes (captura del contador de invitaciones). Solo opcional.</span></th><td><span class="st-opt">opcional</span> <span class="st-goal">★ 3</span></td><td><span class="st-opt">opcional</span> <span class="st-goal">★ 2</span></td><td><span class="st-opt">opcional</span> <span class="st-goal">★ 1</span></td><td>Con evidencia</td></tr>
+              <tr><th scope="row">Evento de la comunidad<span>Organizar o ayudar en un evento (torneo, sorteo, mini evento con ;CreatorEvent). Sube capturas o el anuncio.</span></th><td>—</td><td><span class="st-opt">opcional</span> <span class="st-goal">★ 1</span></td><td><span class="st-opt">opcional</span> <span class="st-goal">★ 1</span></td><td>Con evidencia</td></tr>
+              <tr><th scope="row">Bugs reportados<span>Errores del juego con video o captura.</span></th><td><span class="st-opt">opcional</span> <span class="st-goal">★ 1</span></td><td><span class="st-opt">opcional</span> <span class="st-goal">★ 1</span></td><td><span class="st-opt">opcional</span> <span class="st-goal">★ 1</span></td><td>Con evidencia</td></tr>
             </tbody>
           </table>
         </div>
@@ -155,21 +173,21 @@
     <section class="st-commands" id="cuota" aria-labelledby="cuota-title">
       <div class="wrap">
         <h2 class="section-title" id="cuota-title">Cuota semanal: juego + Discord</h2>
-        <p class="section-lead">Cada semana (lunes a domingo) sumas horas de conexión. Cuenta el tiempo en el juego <strong>y</strong> el tiempo que pasas ayudando en el Discord: cada rato en el que escribes en los canales del staff suma minutos. Si ayudas mucho en Discord, se te piden menos horas en el juego, pero siempre hay un mínimo en el juego.</p>
+        <p class="section-lead">Cada semana (lunes a domingo) sumas horas de conexión. Cuenta el tiempo activo en el juego (no hace falta ningún comando; el AFK no suma) <strong>y</strong> el tiempo que pasas ayudando en el Discord: cada rato en el que escribes en los canales del staff suma minutos. Si ayudas mucho en Discord, se te piden menos horas en el juego, pero siempre hay un mínimo en el juego.</p>
         <div class="st-table">
           <table>
             <thead><tr><th scope="col">Rango</th><th scope="col">Horas por semana</th><th scope="col">Mínimo en el juego</th></tr></thead>
-            <tbody><tr><th scope="row">🛟 Helper</th><td>3 h</td><td>1 h</td></tr><tr><th scope="row">🛡️ Moderator Jr</th><td>4 h</td><td>1,5 h</td></tr><tr><th scope="row">⚔️ Moderator</th><td>5 h</td><td>2 h</td></tr></tbody>
+            <tbody><tr><th scope="row">🛟 Helper</th><td>5 h</td><td>2 h</td></tr><tr><th scope="row">🛡️ Moderator Jr</th><td>4 h</td><td>1,5 h</td></tr><tr><th scope="row">⚔️ Moderator</th><td>3 h</td><td>1 h</td></tr></tbody>
           </table>
         </div>
-        <p class="section-lead">Ejemplo de un Helper: 2 h escribiendo en Discord + 1 h en el juego = semana cumplida. Los valores pueden cambiar: los actuales siempre están en tu panel.</p>
+        <p class="section-lead">Ejemplo de un Helper (5 h): 2 h ayudando en Discord + 3 h activo en el juego = semana cumplida. El tiempo AFK no cuenta. Los valores pueden cambiar: los actuales siempre están en tu panel.</p>
       </div>
     </section>
 
     <section class="cr-rules" aria-labelledby="reglas-title">
       <div class="wrap">
         <h2 class="section-title" id="reglas-title">Normas del staff</h2>
-        <ul class="rules"><li>Neutralidad: nada de favores a amigos ni sanciones por enojo personal.</li><li>Primero se avisa (;Warn), después se actúa. Los baneos siempre con motivo claro.</li><li>Nada de usar comandos para ventaja propia, trolear o mover la economía.</li><li>Todo queda registrado (juego y página): los abusos se revisan y se sancionan.</li><li>Los casos graves o dudosos se escalan al rango superior por ;sc o el canal de staff.</li><li>¿No puedes cumplir una semana o un mes (exámenes, viaje, enfermedad)? Presenta una excusa en el panel: si la aprueban, no pierdes el rango.</li><li><strong>13 años o más</strong> y cuenta de Roblox que haya jugado Sky Eggs.</li></ul>
+        <ul class="rules"><li>Neutralidad: nada de favores a amigos ni sanciones por enojo personal.</li><li>Primero se avisa (;Warn), después se actúa. Los baneos siempre con motivo claro.</li><li>Nada de usar comandos para ventaja propia, trolear o mover la economía.</li><li>Todo queda registrado (juego y página): los abusos se revisan y se sancionan.</li><li>Los casos graves o dudosos se escalan al rango superior por ;sc o el canal de staff.</li><li>¿No puedes cumplir una semana o un mes (exámenes, viaje, enfermedad)? Presenta una excusa en el panel: si la aprueban, no pierdes el rango.</li><li>Cada tarea tiene una cuota obligatoria (para mantener el rango) y una meta opcional más alta (para ascender).</li><li>Si pasas 2 meses seguidos sin cumplir las cuotas obligatorias, bajas un rango (un Helper sale del staff). Puedes volver a subir cumpliendo.</li><li><strong>13 años o más</strong> y cuenta de Roblox que haya jugado Sky Eggs.</li></ul>
       </div>
     </section>
 
@@ -177,11 +195,12 @@
       <div class="wrap">
         <h2 class="section-title" id="faq-title">Preguntas</h2>
         <details><summary>Ya soy Helper, Moderator Jr o Moderator, ¿tengo que aplicar?</summary><p>No. Entra al panel con Discord y vincula tu cuenta de Roblox antes del <strong>1 de diciembre de 2026</strong>. Si no lo haces, pierdes el rango en el juego y en Discord y tendrás que llenar el formulario de Helper.</p></details>
-        <details><summary>¿Cómo se cuentan mis horas?</summary><p>El juego avisa a la página cada minuto quién del staff está conectado. Las horas en servicio cuentan cuando activas <code>;Duty</code>.</p></details>
+        <details><summary>¿Cómo se cuentan mis horas?</summary><p>Con solo estar en el juego ya cuentan; no hace falta ningún comando. El tiempo AFK (más de 3 minutos sin moverte, sin escribir y sin usar comandos) no suma a la cuota. También cuenta lo que escribes en los canales del Discord.</p></details>
         <details><summary>¿Qué cuenta como acción de moderación?</summary><p><code>;Warn</code>, <code>;Mute</code>, <code>;Kick</code>, <code>;Jail</code>, los baneos y los <code>;Report</code> que envías. Úsalos solo cuando hacen falta: los abusos se revisan.</p></details>
         <details><summary>¿Cómo subo de rango?</summary><p>Cumple tus tareas y pide el ascenso desde el panel. A Moderator Jr lo aprueba un Moderator o el Admin; a Moderator, solo el Admin.</p></details>
         <details><summary>¿Cuenta lo que hago en Discord?</summary><p>Sí. Los mensajes en los canales del staff suman tiempo de conexión para tu cuota semanal y para los días activos. Solo se mira cuándo escribiste, nunca lo que escribiste.</p></details>
-        <details><summary>No voy a poder cumplir una semana o un mes, ¿pierdo el rango?</summary><p>No si avisas. Presenta una excusa en el panel (exámenes, viaje, enfermedad…). Si un rango superior la aprueba, esa semana cuenta como cumplida o ese mes no suma falta. Si llegas a 2 meses seguidos sin cumplir, tienes 5 días para presentar la excusa antes de salir del staff.</p></details>
+        <details><summary>No voy a poder cumplir una semana o un mes, ¿pierdo el rango?</summary><p>No si avisas. Presenta una excusa en el panel (exámenes, viaje, enfermedad…). Si un rango superior la aprueba, esa semana cuenta como cumplida o ese mes no suma falta. Si llegas a 2 meses seguidos sin cumplir, tienes 5 días para presentar la excusa antes de bajar un rango.</p></details>
+        <details><summary>¿Cómo subo de rango?</summary><p>Cumple tus cuotas obligatorias y llega a las metas opcionales (★) para tener buen desempeño. Con los días mínimos en tu rango, pídelo desde el panel.</p></details>
         <details><summary>Me rechazaron, ¿puedo volver a aplicar?</summary><p>Sí, 14 días después del rechazo.</p></details>
         <details><summary>¿Cómo reporto a un jugador?</summary><p>Cualquier jugador puede escribir <code>;Report &lt;jugador&gt; &lt;motivo&gt;</code> en el juego. El reporte llega al panel del staff.</p></details>
       </div>
@@ -201,5 +220,6 @@
       <p class="footer__legal"><a href="/">Volver a Sky Eggs</a> · <a href="/creadores/">Programa de creadores</a></p>
     </div>
   </footer>
+  <script src="/staff/staff.js?v=__ASSET_V__" defer></script>
 </body>
 </html>

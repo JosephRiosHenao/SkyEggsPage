@@ -243,7 +243,19 @@ Página pública: `/staff/` (generada con `node scripts/build-staff-page.mjs` de
   - requisitos de ascenso;
   - faltas, avisos y excusas.
   - Las variables `STAFF_*` son solo los valores iniciales.
-- **Cuota semanal**: juego + crédito de Discord ≥ horas del rango, y el juego ≥ el mínimo del rango.
+- **Cuota semanal**: juego activo + crédito de Discord ≥ horas del rango, y el juego ≥ el mínimo del rango.
+  - Por defecto: Helper 5 h (mín. 2 en el juego), Moderator Jr 4 h (1,5), Moderator 3 h (1).
+  - No hay `;Duty`: cuenta todo el tiempo conectado menos el AFK. AFK = 3 min sin moverse, sin escribir y sin usar comandos (`StaffActivity` en el juego).
+- **Tareas**: cada una tiene, por rango, una cuota **obligatoria** (`min`) y una meta **opcional** (`goal`).
+  - Las obligatorias mantienen el rango.
+  - Las metas dan el **desempeño** (%) que se pide para ascender.
+  - Sanciones, revisiones, invitaciones, eventos y bugs son solo opcionales.
+- **Bajada de rango**: con 2 meses seguidos sin las cuotas obligatorias (y sin excusa aprobada en los 5 días de plazo), baja un rango (Moderator → Moderator Jr → Helper → fuera).
+- **Anuncios en Discord** (`api/src/announce.js`): el bot escribe en `DISCORD_ANNOUNCE_CHANNEL` y menciona al rango que corresponde.
+  - Avisos: solicitudes y videos de creadores, bonos, solicitudes de Helper, excusas, ascensos, reportes del juego, bienvenidas y el recordatorio de vincular.
+  - Cada aviso se activa o desactiva y elige a quién mencionar en Ajustes. Las menciones del mismo aviso se espacian 30 min.
+  - El bot necesita «Enviar mensajes» y poder mencionar esos roles.
+- **Carrusel público** en `/staff/` (`GET /api/staff/public`): foto, rango, conectado, «Unirme a su servidor» (`games/start?placeId=…&gameInstanceId=…`). Cada miembro puede ocultarse desde su panel.
 - **Actividad en Discord**:
   1. El Admin elige los canales (IDs).
   2. Cada 5 min el bot lee quién escribió y cuándo (`GET /channels/{id}/messages?after=`). Nunca lee el texto, así que no hace falta Message Content Intent.

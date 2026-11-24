@@ -951,20 +951,32 @@
     s.replaceChildren(box);
   }
 
+  // Tareas del mes: cada una con su cuota obligatoria (min) y su meta opcional (goal).
   function progressBlock(p, title) {
     const box = el("div", { class: "box" }, el("div", { class: "item__head" }, el("h2", {}, title),
-      el("span", { class: `pill ${p.complete ? "pill--approved" : "pill--pending"}` }, p.complete ? "Mes cumplido" : `${p.done}/${p.required} tareas · ${p.percent}%`)));
+      el("div", { class: "inline" },
+        el("span", { class: `pill ${p.complete ? "pill--approved" : "pill--pending"}` }, p.excused ? "Excusado" : p.complete ? "Cuotas cumplidas" : `Obligatorias ${p.done}/${p.required} · ${p.percent}%`),
+        el("span", { class: "pill pill--contacted" }, `Desempeño ${p.performance}%`))),
+      el("p", { class: "small muted" }, "Las cuotas obligatorias (marca ▲) mantienen tu rango. Las metas opcionales suman desempeño: con buen desempeño puedes pedir ascenso. Si nadie rompe las reglas o no llegan solicitudes, las tareas opcionales no te perjudican."));
     const grid = el("div", { class: "task-grid" });
     for (const t of p.tasks) {
-      const pct = Math.min(100, (t.value / t.target) * 100);
-      const bar = el("div", { class: "meter" }, el("div", { class: "meter__fill", "data-w": pct }));
-      grid.append(el("div", { class: `task${t.done ? " is-done" : ""}${t.optional ? " is-optional" : ""}` },
-        el("div", { class: "task__head" }, el("strong", {}, t.name), el("span", { class: "task__val" }, `${String(t.value).replace(".", ",")} / ${t.target} ${t.unit}`)),
+      const top = Math.max(t.goal, t.min, 1);
+      const bar = el("div", { class: "meter meter--goal" }, el("div", { class: "meter__fill", "data-w": Math.min(100, (t.value / top) * 100) }),
+        t.min > 0 && t.goal > t.min ? el("span", { class: "meter__min", "data-l": (t.min / top) * 100, title: `Cuota obligatoria: ${t.min}` }) : null);
+      const v = String(t.value).replace(".", ",");
+      grid.append(el("div", { class: `task${t.done && t.required ? " is-done" : ""}${t.goalDone ? " is-goal" : ""}${t.required ? "" : " is-optional"}` },
+        el("div", { class: "task__head" }, el("strong", {}, t.name), el("span", { class: "task__val" }, `${v} ${t.unit}`)),
         bar,
-        el("p", { class: "small muted" }, `${t.track === "auto" ? "Se mide solo" : "Con evidencias"}${t.optional ? " · extra (no obligatoria)" : ""}${t.pending ? ` · ${t.pending} en revisión` : ""}`)));
+        el("div", { class: "task__marks" },
+          t.min > 0 ? el("span", { class: `mark mark--req${t.done ? " ok" : ""}` }, `▲ Obligatoria: ${t.min}${t.done ? " ✔" : ""}`) : el("span", { class: "mark" }, "Solo opcional"),
+          t.goal > 0 ? el("span", { class: `mark mark--goal${t.goalDone ? " ok" : ""}` }, `★ Meta: ${t.goal}${t.goalDone ? " ✔" : ""}`) : null),
+        el("p", { class: "small muted" }, `${t.track === "auto" ? "Se mide solo" : "Con evidencias"}${t.pending ? ` · ${t.pending} en revisión` : ""}`)));
     }
     box.append(grid);
-    requestAnimationFrame(() => { for (const f of box.querySelectorAll(".meter__fill")) f.style.width = `${f.dataset.w}%`; });
+    requestAnimationFrame(() => {
+      for (const f of box.querySelectorAll(".meter__fill")) f.style.width = `${f.dataset.w}%`;
+      for (const m of box.querySelectorAll(".meter__min")) m.style.left = `${m.dataset.l}%`;
+    });
     return box;
   }
 
@@ -972,14 +984,20 @@
     const st = await api("/api/staff/me");
     if (!st.current) return s.replaceChildren(el("div", { class: "notice" }, "Todavía no tienes un rango de staff activo."));
     const rank = st.staff.rank;
-    const evTasks = staffProgram.tasks.filter((t) => t.track === "evidence" && (t.targets[rank] || 0) > 0);
+    const evTasks = staffProgram.tasks.filter((t) => t.track === "evidence" && ((t.min[rank] || 0) > 0 || (t.goal[rank] || 0) > 0));
     const head = el("div", { class: "box hero-card" },
       el("div", {}, el("p", { class: "small muted" }, "Tu rango"), el("h2", {}, `${staffProgram.ranks.find((r) => r.key === rank)?.emoji || ""} ${RANK_NAME[rank]}`),
         el("p", { class: "small muted" }, `En el staff desde ${new Date(st.staff.joinedAt).toLocaleDateString("es-CO", { dateStyle: "medium" })}${st.staff.roblox ? ` · Roblox @${st.staff.roblox.name}` : ""}`)),
       el("div", { class: "hero-card__stats" },
         tile(String(st.current.activity.actions), "comandos este mes"), tile(String(st.current.activity.reportsFiled), "reportes enviados"),
+        tile(`${st.current.performance}%`, "desempeño del mes", st.current.performance >= 75 ? "good" : null),
         tile(String(st.staff.strikes), "meses sin cumplir", st.staff.strikes ? "warn" : null)));
-    const warn = st.staff.strikes && !st.removalDueAt ? el("div", { class: "notice notice--bad" }, `Tienes ${st.staff.strikes} mes sin cumplir tus tareas. Con ${staffProgram.failMonthsToRemove} seguidos sales del staff.`) : null;
+    const pub = el("input", { type: "checkbox", checked: st.staff.publicProfile });
+    pub.addEventListener("change", () => act(pub, () => api("/api/staff/public-profile", { on: pub.checked }), (o) => (o.publicProfile ? "Apareces en skyeggs.pro/staff." : "Ya no apareces en skyeggs.pro/staff.")));
+    const pubBox = el("div", { class: "box" }, el("h2", {}, "Tu perfil en skyeggs.pro/staff"),
+      el("p", { class: "small muted" }, "En la página del staff hay un carrusel con tu foto y nombre de Roblox, tu rango y si estás conectado (con un botón para unirse a tu servidor). No se muestra tu Discord ni tus horas."),
+      el("label", { class: "check" }, pub, "Mostrar mi perfil en la página del staff"));
+    const warn = st.staff.strikes && !st.removalDueAt ? el("div", { class: "notice notice--bad" }, `Tienes ${st.staff.strikes} mes sin cumplir las cuotas obligatorias. Con ${staffProgram.failMonthsToRemove} seguidos bajas un rango${rank === "Helper" ? " (como Helper, sales del staff)" : ""}.`) : null;
     const form = el("form", { class: "form" },
       el("div", { class: "row" },
         el("label", {}, "Tarea", el("select", { name: "task" }, ...evTasks.map((t) => el("option", { value: t.key }, t.name)))),
@@ -1016,11 +1034,11 @@
       else promo.append(el("p", { class: "small muted" }, "Cuando cumplas todo podrás pedirlo aquí. Un rango superior también puede proponerte."));
     }
     if (st.removalDueAt) s.dataset.removal = "1";
-    const removal = st.removalDueAt ? el("div", { class: "notice notice--bad" }, `No cumpliste ${st.staff.strikes} meses seguidos: sales del staff el ${new Date(st.removalDueAt).toLocaleDateString("es-CO", { dateStyle: "long" })} si no presentas una excusa. `, el("a", { href: "#staff-excusas" }, "Presentar excusa →")) : null;
+    const removal = st.removalDueAt ? el("div", { class: "notice notice--bad" }, `No cumpliste las cuotas obligatorias ${st.staff.strikes} meses seguidos: ${rank === "Helper" ? "sales del staff" : "bajas un rango"} el ${new Date(st.removalDueAt).toLocaleDateString("es-CO", { dateStyle: "long" })} si no presentas una excusa. `, el("a", { href: "#staff-excusas" }, "Presentar excusa →")) : null;
     s.replaceChildren(...[head, removal, warn, weekCard(st.week, "Cuota de esta semana"), weeksBlock(st.current), progressBlock(st.current, `Tareas de ${st.current.month}`),
-      el("div", { class: "box" }, el("h2", {}, "Subir evidencia"), el("p", { class: "small muted" }, "Las horas, días y acciones de moderación se miden solas desde el juego (usa ;Duty cuando ayudes). Para el resto sube capturas."), form),
+      el("div", { class: "box" }, el("h2", {}, "Subir evidencia"), el("p", { class: "small muted" }, "Las semanas, los días y las acciones de moderación se miden solos (juego y Discord). Para ayudas, invitaciones, eventos y bugs sube capturas."), form),
       el("div", { class: "box" }, el("h2", {}, "Mis evidencias"), evList), promo,
-      st.previous.tasks.length ? progressBlock(st.previous, `Mes pasado (${st.previous.month})`) : null].filter(Boolean));
+      st.previous.tasks.length ? progressBlock(st.previous, `Mes pasado (${st.previous.month})`) : null, pubBox].filter(Boolean));
   }
 
   function staffGuide(s) {
@@ -1032,7 +1050,9 @@
         el("h3", {}, "En el juego"), el("dl", { class: "cmds" }, ...r.game.flatMap((c) => [el("dt", {}, c.cmd), el("dd", {}, c.desc)])),
         el("h3", {}, "En Discord"), el("ul", { class: "list-plain" }, ...r.discord.map((d) => el("li", {}, d))),
         el("h3", {}, "Beneficios"), el("ul", { class: "list-plain" }, ...r.benefits.map((d) => el("li", {}, d))),
-        el("h3", {}, "Tareas del mes"), el("ul", { class: "list-plain" }, ...p.tasks.filter((t) => (t.targets[r.key] || 0) > 0).map((t) => el("li", {}, `${t.name}: ${t.targets[r.key]} ${t.unit}${t.optional ? " (extra)" : ""} — ${t.desc}`))))));
+        el("h3", {}, "Tareas del mes"), el("ul", { class: "list-plain" }, ...p.tasks.filter((t) => (t.min[r.key] || 0) > 0 || (t.goal[r.key] || 0) > 0).map((t) => el("li", {},
+          el("strong", {}, t.name), `: ${t.min[r.key] ? `▲ obligatoria ${t.min[r.key]}` : "solo opcional"}${t.goal[r.key] ? ` · ★ meta ${t.goal[r.key]}` : ""} ${t.unit} — ${t.desc}`))),
+        p.weekly ? el("p", { class: "small" }, `Cuota semanal: ${String(p.weekly[r.key].hours).replace(".", ",")} h (juego activo + Discord), con al menos ${String(p.weekly[r.key].minGameHours).replace(".", ",")} h en el juego.`) : null)));
   }
 
   async function staffReports(body) {
@@ -1110,10 +1130,10 @@
         el("td", {}, el("span", { class: `dot ${m.online ? "dot--on" : ""}`, title: m.online ? "Conectado" : "Desconectado" }), m.discord, m.roblox ? el("div", { class: "small muted" }, link(`https://www.roblox.com/users/${m.roblox.userId}/profile`, `@${m.roblox.name}`)) : null),
         el("td", {}, rankPill(m.rank), m.gameRank && m.gameRank !== m.rank ? el("div", { class: "small muted" }, `En el juego: ${RANK_NAME[m.gameRank]}`) : null, m.linkStatus === "pending" ? el("div", { class: "small muted" }, "vínculo pendiente") : null),
         el("td", {}, m.online ? "ahora" : ago(m.lastSeen)),
-        el("td", {}, hours(m.hoursToday), el("div", { class: "small muted" }, `${hours(m.hoursWeek)} 7 días · ${hours(m.dutyWeek)} servicio`)),
+        el("td", {}, hours(m.hoursToday), el("div", { class: "small muted" }, `${hours(m.hoursWeek)} 7 días · ${hours(m.afkWeek)} AFK`)),
         el("td", {}, m.week ? el("div", {}, m.week.met ? pill("approved", m.week.excused ? "Excusada" : "Cumplida") : pill("pending", `${h1(m.week.totalHours)}/${h1(m.week.targetHours)} h`),
           el("div", { class: "small muted" }, `${h1(m.week.gameHours)} juego · ${h1(m.week.discordHours)} Discord`)) : "—"),
-        el("td", {}, m.progress ? el("div", {}, el("div", { class: "meter meter--sm" }, el("div", { class: "meter__fill", "data-w": m.progress.percent })), el("span", { class: "small" }, `${m.progress.percent}% · ${m.progress.done}/${m.progress.required}`)) : "—"),
+        el("td", {}, m.progress ? el("div", {}, el("div", { class: "meter meter--sm" }, el("div", { class: "meter__fill", "data-w": m.progress.percent })), el("span", { class: "small" }, `${m.progress.percent}% · ${m.progress.done}/${m.progress.required}`), el("div", { class: "small muted" }, `desempeño ${m.progress.performance}%`)) : "—"),
         el("td", {}, m.progress ? `${m.progress.activity.actions} cmds · ${m.progress.activity.reportsFiled} rep. · ${m.progress.activity.discordMessages} msj. Discord` : "—"),
         el("td", {}, String(m.strikes || 0), m.removalDueAt ? el("div", { class: "small bad-text" }, `sale el ${new Date(m.removalDueAt).toLocaleDateString("es-CO")}`) : null),
         el("td", {}, canEdit ? el("div", { class: "inline" }, sel, btn("Guardar", "btn--white", (b) => {
@@ -1230,7 +1250,8 @@
         el("p", { class: "muted" }, h.items.length ? `Tienes ${h.items.length} cosa(s) pendiente(s)${h.items.some((i) => i.priority === 1) ? ", empieza por las urgentes." : "."}` : "Todo al día. ¡Buen trabajo!")),
       h.me ? el("div", { class: "hero-card__stats" },
         tile(h.me.week.met ? "✔" : `${String(h.me.week.totalHours).replace(".", ",")}/${h.me.week.targetHours} h`, "cuota de la semana", h.me.week.met ? "good" : null),
-        tile(`${h.me.month.percent}%`, "tareas del mes", h.me.month.complete ? "good" : h.me.month.percent < 50 ? "warn" : null),
+        tile(`${h.me.month.percent}%`, "cuotas obligatorias", h.me.month.complete ? "good" : h.me.month.percent < 50 ? "warn" : null),
+        tile(`${h.me.month.performance}%`, "desempeño", h.me.month.performance >= 75 ? "good" : null),
         tile(String(h.me.strikes), "meses sin cumplir", h.me.strikes ? "warn" : null)) : null);
     out.push(hello);
     if (!u.roles.inGuild) out.push(el("div", { class: "notice" }, "No estás en el Discord de Sky Eggs. Únete y vuelve a entrar para que podamos ver tus roles. ",
@@ -1266,7 +1287,7 @@
     const min = el("div", { class: "qbar__min", "data-l": (w.minGameHours / max) * 100, title: `Mínimo en el juego: ${h1(w.minGameHours)} h` });
     const box = el("div", { class: "box" },
       el("div", { class: "item__head" }, el("h2", {}, title), w.excused ? pill("approved", "Excusada") : w.met ? pill("approved", "Cumplida") : pill("pending", `Faltan ${h1(w.missingHours || w.missingGameHours)} h`)),
-      el("p", { class: "small muted" }, `Semana del ${w.start.split("-").reverse().join("/")} al ${w.end.split("-").reverse().join("/")}. Cuentan las horas en el juego y lo que escribes en el Discord. Esta semana te piden ${h1(w.requiredGameHours)} h en el juego: baja cuanto más ayudes en Discord, hasta un mínimo de ${h1(w.minGameHours)} h.`),
+      el("p", { class: "small muted" }, `Semana del ${w.start.split("-").reverse().join("/")} al ${w.end.split("-").reverse().join("/")}. Cuentan las horas activo en el juego (el AFK no) y lo que escribes en el Discord. Esta semana te piden ${h1(w.requiredGameHours)} h en el juego: baja cuanto más ayudes en Discord, hasta un mínimo de ${h1(w.minGameHours)} h.`),
       el("div", { class: "qbar", role: "img", "aria-label": `${h1(w.gameHours)} h en el juego y ${h1(w.discordHours)} h en Discord de ${h1(w.targetHours)} h` }, g, d, min, goal),
       el("div", { class: "legend" }, el("span", { class: "legend__p" }, `Juego ${h1(w.gameHours)} h`), el("span", { class: "legend__s" }, `Discord ${h1(w.discordHours)} h`), el("span", { class: "legend__m" }, `Mínimo en el juego ${h1(w.minGameHours)} h`)));
     requestAnimationFrame(() => {
@@ -1342,10 +1363,13 @@
       return i;
     };
     const TASKS = staffProgram.tasks;
+    const pair = (t, r) => el("div", { class: "pair" },
+      el("label", { class: "pair__item" }, el("span", {}, "▲ Obligatoria"), numIn(() => st.targets[t.key].min[r], (v) => { st.targets[t.key].min[r] = v; }, { max: t.key === "weeks" ? 5 : 500 })),
+      el("label", { class: "pair__item" }, el("span", {}, "★ Meta"), numIn(() => st.targets[t.key].goal[r], (v) => { st.targets[t.key].goal[r] = v; }, { max: t.key === "weeks" ? 5 : 500 })));
     const targets = el("table", { class: "tbl tbl--grid" },
       el("thead", {}, el("tr", {}, el("th", {}, "Tarea del mes"), ...RK.map((r) => el("th", {}, RANK_NAME[r])))),
-      el("tbody", {}, ...TASKS.map((t) => el("tr", {}, el("th", { scope: "row" }, t.name, el("div", { class: "small muted" }, `${t.unit}${t.track === "auto" ? " · automática" : " · con evidencia"}${t.optional ? " · extra" : ""}`)),
-        ...RK.map((r) => el("td", {}, numIn(() => st.targets[t.key][r], (v) => { st.targets[t.key][r] = v; }, { max: t.key === "weeks" ? 5 : 500 })))))));
+      el("tbody", {}, ...TASKS.map((t) => el("tr", {}, el("th", { scope: "row" }, t.name, el("div", { class: "small muted" }, `${t.unit}${t.track === "auto" ? " · automática" : " · con evidencia"}`)),
+        ...RK.map((r) => el("td", {}, pair(t, r)))))));
     const weekly = el("table", { class: "tbl tbl--grid" },
       el("thead", {}, el("tr", {}, el("th", {}, "Cuota semanal"), ...RK.map((r) => el("th", {}, RANK_NAME[r])))),
       el("tbody", {},
@@ -1353,10 +1377,10 @@
         el("tr", {}, el("th", { scope: "row" }, "Mínimo en el juego", el("div", { class: "small muted" }, "aunque escriba mucho en Discord")), ...RK.map((r) => el("td", {}, numIn(() => st.weekly[r].minGameHours, (v) => { st.weekly[r].minGameHours = v; }, { max: 80, step: 0.5 }))))));
     const promo = el("table", { class: "tbl tbl--grid" },
       el("thead", {}, el("tr", {}, el("th", {}, "Para pedir ascenso a"), el("th", {}, "Moderator Jr"), el("th", {}, "Moderator"))),
-      el("tbody", {}, ...[["minDays", "Días mínimos en su rango", 365], ["minPercent", "% de tareas del mes en curso", 100], ["completeMonths", "Meses cumplidos seguidos", 6]].map(([k, label, max]) =>
+      el("tbody", {}, ...[["minDays", "Días mínimos en su rango", 365], ["minPerformance", "% de desempeño (metas opcionales)", 100], ["completeMonths", "Meses con las cuotas cumplidas seguidos", 6]].map(([k, label, max]) =>
         el("tr", {}, el("th", { scope: "row" }, label), ...["ModeratorJr", "Moderator"].map((r) => el("td", {}, numIn(() => st.promotion[r][k], (v) => { st.promotion[r][k] = v; }, { max })))))));
     const rules = el("div", { class: "form" }, el("div", { class: "row" }, ...[
-      ["failMonthsToRemove", "Meses seguidos sin cumplir para salir (0 = nunca)", 12], ["excuseDays", "Días para presentar excusa antes de salir", 30],
+      ["failMonthsToRemove", "Meses seguidos sin cumplir para bajar un rango (0 = nunca)", 12], ["excuseDays", "Días para presentar excusa antes de bajar", 30],
       ["maxExcusesPerYear", "Excusas aprobadas por año", 24], ["warnDay", "Día del mes del aviso", 28], ["warnPercent", "Avisar si va por debajo del %", 100], ["graceDays", "Días para subir evidencias del mes pasado", 10],
     ].map(([k, label, max]) => el("label", {}, label, numIn(() => st.rules[k], (v) => { st.rules[k] = v; }, { max })))));
     const chans = el("textarea", { rows: "2", placeholder: "IDs de canales separados por coma (clic derecho en el canal → Copiar ID)", disabled: ro }, st.discord.channels.join(", "));
@@ -1376,6 +1400,27 @@
       chBox,
       !ro ? el("div", { class: "form-actions" }, btn("Leer los canales ahora", "btn--white", (b) => act(b, () => api("/api/mod/staff/discord-poll", {}), (o) => { chBox.replaceChildren(chStatus(o.channels)); return `${o.messages} mensaje(s) nuevos, ${o.counted} del staff.${o.errors.length ? " Hay errores en algún canal." : ""}`; }))) : null,
       el("p", { class: "small muted" }, "El bot lee cada 5 minutos solo quién escribió y cuándo (nunca el texto, no hace falta «Message Content Intent»). Necesita «Ver canal» y «Leer el historial de mensajes» en esos canales. La primera lectura empieza desde ese momento, no cuenta mensajes viejos."));
+    // Anuncios en Discord: activar cada aviso y elegir a quién mencionar.
+    const MN = { Helper: "Helper", ModeratorJr: "Moderator Jr", Moderator: "Moderator", Admin: "Admin", Creator: "Creadores", auto: "Rango que revisa" };
+    const anOn = el("input", { type: "checkbox", checked: st.announce.enabled, disabled: ro });
+    anOn.addEventListener("change", () => { st.announce.enabled = anOn.checked; });
+    const evRows = Object.entries(d.announceEvents).map(([k, meta]) => {
+      const e = st.announce.events[k];
+      const on = el("input", { type: "checkbox", checked: e.on, disabled: ro });
+      on.addEventListener("change", () => { e.on = on.checked; });
+      const opts = (meta.mention.includes("auto") ? ["auto"] : []).concat(d.mentionable);
+      return el("tr", {}, el("td", {}, el("label", { class: "check" }, on, meta.name)),
+        el("td", {}, el("div", { class: "chips" }, ...opts.map((m) => {
+          const c = el("input", { type: "checkbox", checked: e.mention.includes(m), disabled: ro });
+          c.addEventListener("change", () => { e.mention = c.checked ? [...new Set([...e.mention, m])] : e.mention.filter((x) => x !== m); });
+          return el("label", { class: "chip" }, c, MN[m] || m);
+        }))));
+    });
+    const announceBox = el("div", { class: "form" },
+      el("label", { class: "check" }, anOn, `Mandar avisos al canal de anuncios del staff (#${d.announceChannel})`),
+      el("label", {}, "Minutos entre menciones del mismo aviso (en medio sale sin mención)", numIn(() => st.announce.mentionEveryMinutes, (v) => { st.announce.mentionEveryMinutes = v; }, { max: 1440 })),
+      el("div", { class: "scrollx" }, el("table", { class: "tbl tbl--grid" }, el("thead", {}, el("tr", {}, el("th", {}, "Aviso"), el("th", {}, "Mencionar a"))), el("tbody", {}, ...evRows))),
+      el("p", { class: "small muted" }, "El bot necesita «Enviar mensajes» y «Mencionar @everyone, @here y todos los roles» en ese canal (o que los roles se puedan mencionar). Las bajadas de rango nunca se anuncian."));
     const save = !ro ? el("div", { class: "form-actions sticky-actions" },
       btn("Guardar ajustes", "btn--yolk", (b) => act(b, () => api("/api/mod/staff/settings", { settings: st }), "Ajustes guardados. Se aplican desde ya a las tareas y cuotas.", async () => { staffProgram = await api("/api/staff/program"); show("admin-staff-ajustes"); })),
       btn("Volver a los valores por defecto", "btn--white", (b) => { if (confirm("¿Volver a los valores por defecto?")) act(b, () => api("/api/mod/staff/settings", { reset: true }), "Ajustes restablecidos.", () => show("admin-staff-ajustes")); }),
@@ -1383,9 +1428,10 @@
     s.replaceChildren(
       el("div", { class: "box" }, el("h2", {}, "Cuota semanal de conexión"), el("p", { class: "small muted" }, "Se cumple si juego + crédito de Discord llega a las horas y el juego llega al mínimo. Con más actividad en Discord se piden menos horas en el juego, nunca menos que el mínimo."), el("div", { class: "scrollx" }, weekly)),
       el("div", { class: "box" }, el("h2", {}, "Actividad en Discord"), discord),
-      el("div", { class: "box" }, el("h2", {}, "Metas del mes"), el("p", { class: "small muted" }, "0 = esa tarea no se pide en ese rango. «Semanas con la cuota cumplida» nunca pide más semanas de las que tiene el mes."), el("div", { class: "scrollx" }, targets)),
+      el("div", { class: "box" }, el("h2", {}, "Tareas del mes"), el("p", { class: "small muted" }, "▲ Obligatoria = cuota para mantener el rango (0 = no es obligatoria). ★ Meta = objetivo opcional más alto que suma desempeño para ascender (0 = no cuenta). Las semanas nunca piden más de las que tiene el mes."), el("div", { class: "scrollx" }, targets)),
       el("div", { class: "box" }, el("h2", {}, "Requisitos de ascenso"), el("p", { class: "small muted" }, "Para que el propio miembro pida el ascenso. Un rango superior puede proponerlo igual, y al final decide quien aprueba (a Moderator, solo el Admin)."), el("div", { class: "scrollx" }, promo)),
-      el("div", { class: "box" }, el("h2", {}, "Faltas, avisos y excusas"), rules),
+      el("div", { class: "box" }, el("h2", {}, "Faltas, avisos y excusas"), el("p", { class: "small muted" }, "Al llegar a los meses sin cumplir, primero tiene unos días para presentar excusa; después baja un rango (Moderator → Moderator Jr → Helper → fuera)."), rules),
+      el("div", { class: "box" }, el("h2", {}, "Avisos en Discord"), announceBox),
       save);
   }
 

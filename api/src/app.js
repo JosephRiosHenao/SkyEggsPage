@@ -8,11 +8,12 @@ import { safeEqual, verifyPassword, createSession, checkSession, getSession, del
 import { discordEnabled, authorizeUrl, fetchDiscordIdentity, rolesFrom, notifyMods, botEnabled, rolesForTier, rolesForStaff, setMemberRoles, diagnoseBot, listMembersWithRoles } from "./discord.js";
 import * as S from "./staff.js";
 import { publicStaffProgram } from "./staffProgram.js";
-import { getStaffSettings, staffSettingsInfo, saveStaffSettings, resetStaffSettings } from "./staffSettings.js";
+import { getStaffSettings, staffSettingsInfo, saveStaffSettings, resetStaffSettings, ANNOUNCE_EVENTS, MENTIONABLE } from "./staffSettings.js";
 import { pollDiscordChannels, discordChannelsStatus } from "./discordActivity.js";
 import { homeFeed } from "./home.js";
 import { evaluateCreators, setCreatorTier, legacyList, noticeList } from "./lifecycle.js";
-import { publicCreators, clearPublicCache, creatorsDashboard, creatorDetail } from "./insights.js";
+import { publicCreators, clearPublicCache, creatorsDashboard, creatorDetail, publicStaff } from "./insights.js";
+import { announce, announceOnce, reviewerRanks } from "./announce.js";
 import { LEVEL_KEYS } from "./program.js";
 import { publicProgram } from "./program.js";
 import { tx } from "./db.js";
@@ -111,6 +112,15 @@ export function startLifecycle({ db, cfg, fetchImpl = fetch, log = console }) {
       const st = S.evaluateStaff(db, cfg);
       if (st.removed || st.warnings || st.removalWarnings) log.info(`[staff] ${st.removed} fuera por tareas, ${st.removalWarnings} con plazo para excusa, ${st.warnings} aviso(s)`);
       await runRoleJobs(db, cfg, st.roleJobs, fetchImpl, log);
+      // Recordatorio al staff antiguo: 3 días y 1 día antes de la fecha límite para vincular.
+      for (const days of [3, 1]) {
+        const left = cfg.staff.linkDeadline - Date.now();
+        if (left > 0 && left <= days * 86_400_000) {
+          const pending = db.prepare("SELECT COUNT(*) AS n FROM staff_legacy_discord WHERE status = 'pending'").get().n + db.prepare("SELECT COUNT(*) AS n FROM staff_legacy_game WHERE status = 'notified'").get().n;
+          if (pending) await announceOnce(db, cfg, `link_deadline_${cfg.staff.linkDeadline}_${days}`, "link_deadline",
+            { text: `⏳ **Staff antiguo**: ${days === 1 ? "mañana" : `en ${days} días`} vence el plazo para vincular Discord + Roblox. Entra a ${cfg.siteUrl}/creadores/panel/ con Discord y vincula tu cuenta, o pierdes el rango en el juego y en Discord.` }, fetchImpl);
+        }
+      }
       if (botEnabled(cfg) && Date.now() - lastDiscordSync > 30 * 60_000) {
         lastDiscordSync = Date.now();
         const members = await listMembersWithRoles(cfg, Object.values(cfg.discord.staffRoles), fetchImpl);
@@ -220,6 +230,20 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
     return u;
   }
   // Errores de reglas del programa → 400/403/404 con su código.
+  // Bienvenidas y ascensos del staff en el canal de anuncios (las bajadas no se anuncian).
+  const NAME = { Helper: "Helper", ModeratorJr: "Moderator Jr", Moderator: "Moderator" };
+  function celebrate(job) {
+    if (!job || !job.staffRank || job.staffRank === "None") return;
+    const m = /staff (\w+) → (\w+)/.exec(job.reason || "");
+    const from = m?.[1];
+    const order = ["None", "Helper", "ModeratorJr", "Moderator"];
+    if (from && order.indexOf(job.staffRank) <= order.indexOf(from)) return;
+    const s = S.getStaff(db, job.discordId);
+    const text = from === "None" || !from
+      ? `🎉 ¡Demos la bienvenida a <@${job.discordId}> (${s?.roblox_name || ""}) como nuevo **Helper** del staff!`
+      : `⬆️ ¡<@${job.discordId}> (${s?.roblox_name || ""}) ahora es **${NAME[job.staffRank]}**! Felicidades.`;
+    announce(db, cfg, "staff_rank", { text, users: [job.discordId] }, fetchImpl);
+  }
   const run = (fn) => { try { return fn(); } catch (e) { if (e instanceof C.Fail) throw new HttpError(e.status, e.code, e.field || null); throw e; } };
 
   async function readImage(req, maxBytes = 5 * 1024 * 1024) {
@@ -301,7 +325,7 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
       requireGame(req);
       const body = await readJson(req, 4096);
       const out = S.recordReport(db, body);
-      if (out.ok) notifyMods(cfg, `📣 Reporte del juego: ${String(body.reporterName).slice(0, 20)} reportó a ${String(body.targetName).slice(0, 20)} — ${cfg.siteUrl}/creadores/panel/#reportes`, fetchImpl);
+      if (out.ok) announce(db, cfg, "game_report", { text: `📣 **Reporte del juego**: ${String(body.reporterName).slice(0, 20)} reportó a **${String(body.targetName).slice(0, 20)}**${body.online ? " (en el servidor ahora)" : ""}. Atiéndelo en ${cfg.siteUrl}/creadores/panel/#staff-reportes` }, fetchImpl);
       return out;
     },
 
@@ -398,6 +422,18 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
     // ----- Programa de creadores -----
     "GET /api/creators/program": async () => publicProgram(cfg),
     // Carrusel: creadores aprobados que no ocultaron su perfil (nombre, foto, rango y redes).
+    "GET /api/staff/public": async (req) => {
+      if (!limits.publicList.take(ipOf(req))) throw new HttpError(429, "slow_down");
+      return publicStaff(db, cfg, fetchImpl);
+    },
+    "POST /api/staff/public-profile": async (req) => {
+      checkOrigin(req);
+      const u = requireUser(req);
+      const b = await readJson(req, 256);
+      const r = db.prepare("UPDATE staff SET public_profile = ? WHERE discord_id = ? AND link_status = 'approved'").run(b.on ? 1 : 0, String(u.id));
+      if (!r.changes) throw new HttpError(403, "not_staff");
+      return { ok: true, publicProfile: Boolean(b.on) };
+    },
     "GET /api/creators/public": async (req) => {
       if (!limits.publicList.take(ipOf(req))) throw new HttpError(429, "slow_down");
       return publicCreators(db, cfg, fetchImpl);
@@ -416,7 +452,7 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
       if (!limits.apply.take(u.id)) throw new HttpError(429, "slow_down");
       const body = await readJson(req, 8192);
       const out = run(() => C.submitApplication(db, u.id, body));
-      notifyMods(cfg, `📝 Nueva solicitud al programa de creadores de @${u.username}: ${cfg.siteUrl}/creadores/panel/#moderacion`, fetchImpl);
+      announce(db, cfg, "creator_application", { text: `📝 **Nueva solicitud de creador** de @${u.username}. Revísala en ${cfg.siteUrl}/creadores/panel/#mod-solicitudes` }, fetchImpl);
       return out;
     },
     "GET /api/creators/me": async (req) => {
@@ -429,7 +465,7 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
       const u = requireCreator(req);
       const body = await readJson(req, 512);
       const out = run(() => C.requestLink(db, u.id, body.userId));
-      notifyMods(cfg, `🔗 @${u.username} pidió vincular la cuenta de Roblox @${out.roblox.name}.`, fetchImpl);
+      announce(db, cfg, "creator_link", { text: `🔗 El creador @${u.username} pidió vincular la cuenta de Roblox @${out.roblox.name}: ${cfg.siteUrl}/creadores/panel/#mod-vinculos` }, fetchImpl);
       return out;
     },
     "POST /api/creators/upload": async (req) => {
@@ -449,7 +485,7 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
       const u = requireCreator(req);
       const body = await readJson(req, 4096);
       const out = run(() => C.addEvidence(db, u.id, body));
-      notifyMods(cfg, `📹 Nueva evidencia de @${u.username} para revisar en ${cfg.siteUrl}/creadores/panel/#moderacion`, fetchImpl);
+      announce(db, cfg, "creator_evidence", { text: `📹 **Nuevo video de creador** de @${u.username} para anotar las vistas: ${cfg.siteUrl}/creadores/panel/#mod-evidencias` }, fetchImpl);
       // Primera lectura de vistas en segundo plano (el moderador ya la ve al revisar).
       if (out.track === "auto" && cfg.views.enabled) probeEvidence(db, cfg, out.id, body.url, probe, log);
       return out;
@@ -473,7 +509,7 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
       const u = requireCreator(req);
       const body = await readJson(req, 512);
       const out = run(() => C.requestBonus(db, u.id, body.evidenceId));
-      notifyMods(cfg, `💰 @${u.username} pidió un bono de ${out.robux} Robux por un video.`, fetchImpl);
+      announce(db, cfg, "creator_bonus", { text: `💰 @${u.username} pidió un **bono de ${out.robux} Robux** por un video: ${cfg.siteUrl}/creadores/panel/#mod-bonos` }, fetchImpl);
       return out;
     },
     "POST /api/creators/special": async (req) => {
@@ -481,7 +517,7 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
       const u = requireCreator(req);
       const body = await readJson(req, 2048);
       const out = run(() => C.requestSpecial(db, cfg, u.id, body));
-      notifyMods(cfg, `👑 @${u.username} pasó las 100.000 vistas del mes y envió un pedido especial al admin.`, fetchImpl);
+      announce(db, cfg, "creator_special", { text: `👑 @${u.username} pasó las 100.000 vistas del mes y envió un **pedido especial**: ${cfg.siteUrl}/creadores/panel/#mod-especiales` }, fetchImpl);
       return out;
     },
 
@@ -500,7 +536,8 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
       if (!limits.creator.take(u.id)) throw new HttpError(429, "slow_down");
       const body = await readJson(req, 4096);
       const out = run(() => S.submitExcuse(db, cfg, u.id, body));
-      notifyMods(cfg, `📝 @${u.username} presentó una excusa (${out.scope === "week" ? "semana del" : "mes"} ${out.period}): ${cfg.siteUrl}/creadores/panel/#staff-excusas-revision`, fetchImpl);
+      const rank = S.getStaff(db, u.id)?.rank;
+      announce(db, cfg, "staff_excuse", { text: `📝 @${u.username} (${rank}) presentó una **excusa** (${out.scope === "week" ? "semana del" : "mes"} ${out.period}): ${cfg.siteUrl}/creadores/panel/#staff-excusas-revision`, auto: reviewerRanks(rank) }, fetchImpl);
       return out;
     },
     "GET /api/staff/me": async (req) => { const u = requireUser(req); return S.myStaffState(db, cfg, u); },
@@ -510,7 +547,7 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
       if (!limits.apply.take(`s${u.id}`)) throw new HttpError(429, "slow_down");
       const body = await readJson(req, 40_000);
       const out = run(() => S.submitStaffApplication(db, u.id, body));
-      notifyMods(cfg, `🛟 Nueva solicitud de Helper de @${u.username}: ${cfg.siteUrl}/creadores/panel/#staff-solicitudes`, fetchImpl);
+      announce(db, cfg, "staff_application", { text: `🛟 **Nueva solicitud de Helper** de @${u.username}: ${cfg.siteUrl}/creadores/panel/#staff-solicitudes` }, fetchImpl);
       return out;
     },
     "POST /api/staff/link": async (req) => {
@@ -519,7 +556,7 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
       const body = await readJson(req, 512);
       const out = run(() => tx(db, () => S.requestStaffLink(db, cfg, u, body)));
       if (out.job) await runRoleJobs(db, cfg, [out.job], fetchImpl, log);
-      if (!out.auto) notifyMods(cfg, `🔗 @${u.username} (staff ${out.rank}) pidió vincular la cuenta de Roblox @${out.roblox.name}.`, fetchImpl);
+      if (!out.auto) announce(db, cfg, "staff_link", { text: `🔗 @${u.username} (${out.rank}) pidió vincular la cuenta de Roblox @${out.roblox.name}: ${cfg.siteUrl}/creadores/panel/#staff-solicitudes` }, fetchImpl);
       return { ok: true, auto: out.auto, rank: out.rank };
     },
     "POST /api/staff/evidence": async (req) => {
@@ -527,13 +564,18 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
       const u = requireUser(req);
       if (!limits.creator.take(u.id)) throw new HttpError(429, "slow_down");
       const body = await readJson(req, 4096);
-      return run(() => S.addStaffEvidence(db, u.id, body));
+      const out = run(() => S.addStaffEvidence(db, u.id, body));
+      const rank = S.getStaff(db, u.id)?.rank;
+      announce(db, cfg, "staff_evidence", { text: `🧾 @${u.username} (${rank}) subió una evidencia de sus tareas: ${cfg.siteUrl}/creadores/panel/#staff-revision`, auto: reviewerRanks(rank) }, fetchImpl);
+      return out;
     },
     "POST /api/staff/promotion": async (req) => {
       checkOrigin(req);
       const a = staffMember(req, "helper");
       const body = await readJson(req, 2048);
-      return run(() => S.requestPromotion(db, a, body, Date.now(), cfg));
+      const out = run(() => S.requestPromotion(db, a, body, Date.now(), cfg));
+      announce(db, cfg, "staff_promotion", { text: `⬆️ Pedido de **ascenso a ${out.to === "ModeratorJr" ? "Moderator Jr" : "Moderator"}** (lo pidió ${a.name}): ${cfg.siteUrl}/creadores/panel/#staff-ascensos`, auto: out.to === "Moderator" ? ["Admin"] : ["Moderator"] }, fetchImpl);
+      return out;
     },
 
     // ----- Moderación del staff -----
@@ -543,6 +585,7 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
       checkOrigin(req); const a = staffActor(req); const b = await readJson(req, 2048);
       const out = run(() => tx(db, () => S.reviewStaffApplication(db, a, b)));
       const r = out.job ? await runRoleJobs(db, cfg, [out.job], fetchImpl, log) : [];
+      celebrate(out.job);
       return { ok: true, status: out.status, discordRole: !out.job ? null : botEnabled(cfg) ? (r[0]?.ok ? "ok" : "error") : "manual" };
     },
     "POST /api/mod/staff/link": async (req) => {
@@ -557,12 +600,14 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
       checkOrigin(req); const a = staffActor(req); const b = await readJson(req, 1024);
       const out = run(() => tx(db, () => S.changeStaffRank(db, a, b)));
       const r = await runRoleJobs(db, cfg, [out.job], fetchImpl, log);
+      celebrate(out.job);
       return { ok: true, discord: botEnabled(cfg) ? (r[0]?.ok ? "ok" : "error") : "manual" };
     },
     "POST /api/mod/staff/promotion": async (req) => {
       checkOrigin(req); const a = staffActor(req); const b = await readJson(req, 1024);
       const out = run(() => tx(db, () => S.reviewPromotion(db, a, b)));
       if (out.job) await runRoleJobs(db, cfg, [out.job], fetchImpl, log);
+      celebrate(out.job);
       return { ok: true };
     },
     "GET /api/mod/staff/excuses": async (req) => { const a = staffMember(req, "modjr"); return { excuses: S.excuseQueue(db, a) }; },
@@ -571,7 +616,7 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
     "GET /api/mod/staff/settings": async (req) => {
       staffMember(req, "modjr");
       const s = getStaffSettings(db, cfg);
-      return { ...staffSettingsInfo(db, cfg), channels: discordChannelsStatus(db, s), bot: botEnabled(cfg) };
+      return { ...staffSettingsInfo(db, cfg), channels: discordChannelsStatus(db, s), bot: botEnabled(cfg), announceEvents: ANNOUNCE_EVENTS, mentionable: MENTIONABLE, announceChannel: cfg.discord.announceChannel };
     },
     "POST /api/mod/staff/settings": async (req) => {
       checkOrigin(req); const a = requireAdmin(req); const b = await readJson(req, 16_384);
@@ -690,7 +735,12 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
       C.audit(db, a, "evidence.probe", null, { id: ev.id, ok: out?.ok, views: out?.views ?? null, error: out?.error ?? null });
       return out;
     },
-    "POST /api/mod/bonus": async (req) => { checkOrigin(req); const a = staffActor(req); const b = await readJson(req, 2048); return run(() => C.reviewBonus(db, a, b)); },
+    "POST /api/mod/bonus": async (req) => {
+      checkOrigin(req); const a = staffActor(req); const b = await readJson(req, 2048);
+      const out = run(() => C.reviewBonus(db, a, b));
+      if (out.status === "pending_admin") announce(db, cfg, "creator_bonus_admin", { text: `💰 Un bono de Robux de creador quedó **listo para el Admin** (lo revisó ${a.name}): ${cfg.siteUrl}/creadores/panel/#mod-bonos` }, fetchImpl);
+      return out;
+    },
     "POST /api/mod/special": async (req) => { checkOrigin(req); const a = staffActor(req, true); const b = await readJson(req, 2048); return run(() => C.reviewSpecial(db, a, b)); },
   };
 

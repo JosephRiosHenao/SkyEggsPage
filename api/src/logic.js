@@ -108,7 +108,7 @@ function cleanPlayer(p) {
   const staffTier = Number.isInteger(stv) && stv >= 0 && stv <= 3 ? stv : null;
   const sa = p.staffActions && typeof p.staffActions === "object" ? p.staffActions : null;
   const staffActions = sa ? { total: Number(sa.total) || 0, sanctions: Number(sa.sanctions) || 0, helps: Number(sa.helps) || 0 } : null;
-  return { userId, name, displayName, level, creatorTier, staffTier, duty: p.duty === true, staffActions };
+  return { userId, name, displayName, level, creatorTier, staffTier, afk: p.afk === true, staffActions };
 }
 const cleanJob = (j) => (typeof j === "string" ? j.replace(/[^A-Za-z0-9-]/g, "").slice(0, 64) : "") || "studio";
 
@@ -138,7 +138,7 @@ export function gamePull(db, cfg, body, now = Date.now()) {
     for (const p of players) {
       const prevSeen = seen.get(p.userId)?.last_seen || null;
       upsertGamePlayer(db, p, day, now);
-      handleGameStaff(db, cfg, p, prevSeen, now);
+      handleGameStaff(db, cfg, p, prevSeen, now, jobId);
       // Creadores antiguos (aviso / quitar el rol) y nivel actual en el juego.
       if (p.creatorTier != null) handleGameCreator(db, cfg, p, now);
       const lowLevel = cfg.minLevel > 0 && !(p.level >= cfg.minLevel);

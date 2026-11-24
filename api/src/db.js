@@ -331,6 +331,11 @@ export function openDb(path) {
   `);
   // ---------- Staff: ajustes, Discord, excusas y resultados por mes (2026-11-23) ----------
   if (!cols("staff").includes("removal_due_at")) db.exec("ALTER TABLE staff ADD COLUMN removal_due_at INTEGER");
+  if (!cols("staff").includes("public_profile")) db.exec("ALTER TABLE staff ADD COLUMN public_profile INTEGER NOT NULL DEFAULT 1");
+  if (!cols("staff_days").includes("afk_seconds")) db.exec("ALTER TABLE staff_days ADD COLUMN afk_seconds INTEGER NOT NULL DEFAULT 0");
+  db.exec("CREATE TABLE IF NOT EXISTS staff_month_results (discord_id TEXT NOT NULL, month TEXT NOT NULL, percent INTEGER NOT NULL, complete INTEGER NOT NULL, excused INTEGER NOT NULL DEFAULT 0, strike INTEGER NOT NULL DEFAULT 0, evaluated_at INTEGER NOT NULL, PRIMARY KEY (discord_id, month))");
+  if (!cols("staff_month_results").includes("performance")) db.exec("ALTER TABLE staff_month_results ADD COLUMN performance INTEGER NOT NULL DEFAULT 0");
+  if (!cols("players").includes("job_id")) db.exec("ALTER TABLE players ADD COLUMN job_id TEXT");
   db.exec(`
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_by TEXT, updated_at INTEGER NOT NULL
