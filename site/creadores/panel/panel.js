@@ -9,6 +9,7 @@
 
   const ERRORS = {
     login_required: "Tu sesión terminó. Entra de nuevo con Discord.",
+    join_guild: "Tienes que estar en el servidor de Discord de Sky Eggs para usar el panel.",
     creator_only: "Esta sección es para creadores con el rol de Content Creator en Discord.",
     forbidden: "No tienes permiso para esto.",
     slow_down: "Vas muy rápido. Espera un momento.",
@@ -146,7 +147,7 @@
       if (okText) flash(typeof okText === "function" ? okText(out) : okText, "ok");
       if (after) await after(out);
     } catch (e) {
-      if (e.status === 401) return start();
+      if (e.status === 401 || e.message === "join_guild") return start();
       flash(errText(e), "bad");
     } finally { btn.disabled = false; }
   }
@@ -225,7 +226,7 @@
     try {
       if (RENDER[key]) await RENDER[key](section);
     } catch (e) {
-      if (e.status === 401) return start();
+      if (e.status === 401 || e.message === "join_guild") return start();
       section.replaceChildren(el("div", { class: "notice notice--bad" }, errText(e)));
     }
     window.scrollTo({ top: 0 });
@@ -1640,12 +1641,28 @@
     }
     if (loginErr) flash(LOGIN_ERRORS[loginErr] || "No se pudo iniciar sesión.", "bad");
     if (!me.user) {
-      $("view-app").hidden = true; $("who").hidden = true; $("view-login").hidden = false;
+      $("view-app").hidden = true; $("who").hidden = true; $("view-join").hidden = true; $("view-login").hidden = false;
       document.body.classList.remove("is-app"); $("nav").replaceChildren(); $("page-title").textContent = "Panel";
       $("login-btn").href = `/api/auth/discord/login?next=${encodeURIComponent("/creadores/panel/" + (location.hash || ""))}`;
       if (!me.discord) flash(LOGIN_ERRORS.discord_off, "bad");
       return;
     }
+    // Sin estar en el servidor de Discord no hay panel: primero tiene que unirse.
+    if (!me.user.roles.inGuild) {
+      $("view-login").hidden = true; $("view-app").hidden = true; $("view-join").hidden = false;
+      document.body.classList.remove("is-app", "nav-open"); $("nav").replaceChildren(); $("page-title").textContent = "Panel";
+      $("who").hidden = false;
+      $("who-pic").src = me.user.avatar || "/img/icon-192.png";
+      $("who-name").textContent = me.user.globalName || me.user.username;
+      $("who-badges").replaceChildren();
+      $("join-name").textContent = me.user.globalName || me.user.username;
+      $("join-check").href = `/api/auth/discord/login?next=${encodeURIComponent("/creadores/panel/" + (location.hash || ""))}`;
+      let checked = false;
+      try { checked = sessionStorage.getItem("se-join-check") === "1"; sessionStorage.removeItem("se-join-check"); } catch { /* sin almacenamiento */ }
+      if (checked) flash("Todavía no te vemos en el servidor. Revisa que te uniste con esta misma cuenta de Discord y vuelve a intentarlo.", "bad");
+      return;
+    }
+    $("view-join").hidden = true;
     $("view-login").hidden = true; $("view-app").hidden = false; $("who").hidden = false;
     document.body.classList.add("is-app");
     const u = me.user;
@@ -1673,6 +1690,8 @@
   $("who-pic").addEventListener("error", (e) => { if (!e.currentTarget.src.endsWith("/img/icon-192.png")) e.currentTarget.src = "/img/icon-192.png"; });
   $("burger").addEventListener("click", () => document.body.classList.toggle("nav-open"));
   $("scrim").addEventListener("click", () => document.body.classList.remove("nav-open"));
+  $("join-logout").addEventListener("click", () => $("logout").click());
+  $("join-check").addEventListener("click", () => { try { sessionStorage.setItem("se-join-check", "1"); } catch { /* sin almacenamiento */ } });
   $("logout").addEventListener("click", async () => {
     await api("/api/auth/logout", {}).catch(() => {});
     me = null; creator = null; queue = null;

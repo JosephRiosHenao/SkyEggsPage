@@ -196,9 +196,11 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
     const s = getSession(db, readCookie(req.headers.cookie, USER_COOKIE), "discord");
     return s ? S.withStaffRoles(db, cfg, C.getDiscordUser(db, s.discord_id)) : null;
   }
+  // Hay que estar en el servidor de Discord de Sky Eggs: sin eso no sabemos sus roles.
   function requireUser(req) {
     const u = currentUser(req);
     if (!u) throw new HttpError(401, "login_required");
+    if (!u.roles.inGuild) throw new HttpError(403, "join_guild");
     return u;
   }
   const passwordAdmin = (req) => checkSession(db, readCookie(req.headers.cookie, COOKIE));
@@ -207,6 +209,7 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
   function staffActor(req, adminOnly = false, min = "moderator") {
     if (passwordAdmin(req)) return { id: `local:${cfg.adminUser}`, name: `${cfg.adminUser} (panel)`, role: "admin", staffRank: null };
     const u = currentUser(req);
+    if (u && !u.roles.inGuild) throw new HttpError(403, "join_guild");
     const name = u && (u.globalName ? `${u.globalName} (@${u.username})` : `@${u.username}`);
     if (u && u.roles.admin) return { id: u.id, name, role: "admin", staffRank: u.roles.staffRank };
     const need = adminOnly ? "admin" : min;
