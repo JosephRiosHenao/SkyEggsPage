@@ -12,8 +12,8 @@ import { hashPassword } from "../src/auth.js";
 import { gamePull } from "../src/logic.js";
 import * as C from "../src/creators.js";
 import { verifyInteraction, langOf } from "../src/bot.js";
-import { receiveEggAlert, updateEggAlert, handleEggButton, expireOldAlerts } from "../src/eggAlerts.js";
-import { announceVideo, handleVideoButton } from "../src/videos.js";
+import { receiveEggAlert, updateEggAlert, handleEggButton, expireOldAlerts, resendEggAlert } from "../src/eggAlerts.js";
+import { announceVideo, handleVideoButton, resendVideo } from "../src/videos.js";
 import { saveCatalog, assetImage, sniffImage } from "../src/assets.js";
 
 const ROLE = { admin: "1560889139375898775", moderator: "1563742282392543312", creator: "1561051688125730897" };
@@ -65,13 +65,14 @@ test("firma de los botones de Discord (Ed25519)", () => {
   assert.equal(langOf("pt-BR"), "pt"); assert.equal(langOf("es-419"), "es"); assert.equal(langOf("fr"), "en");
 });
 
-test("alerta de huevo absurdo: imagen como adjunto, traducción, ¡Voy!, agarrado y estadísticas", async () => {
+test("alerta de huevo absurdo: compacta, ícono en el mensaje, Unirse con cupo, Egg Ping, agarrado y reenviar", async () => {
   const db = openDb(":memory:"); const c = cfg(); const net = fakeNet();
-  saveCatalog(db, [{ kind: "egg", name: "Galactic Faberge Egg", rarity: "Mythic", icon: "rbxassetid://129186172275552" }]);
+  saveCatalog(db, [{ kind: "egg", name: "Galactic Faberge Egg", rarity: "Legendary", icon: "rbxassetid://129186172275552" }]);
+  gamePull(db, c, { jobId: "abcdef12-3456", players: [{ userId: 1, name: "Uno", displayName: "Uno", level: 30 }] });
   const body = {
-    key: "job-1:1", asset: "Galactic Faberge Egg", rarity: "Mythic", size: "absurdo", weight: 812.4, value: 2_500_000, place: "Level8",
+    key: "job-1:1", asset: "Galactic Faberge Egg", rarity: "Legendary", size: "absurdo", weight: 812.4, value: 2_500_000, place: "Level8",
     iconId: "rbxassetid://129186172275552", jobId: "abcdef12-3456", placeId: 77372347150746, studio: false, players: 7, maxPlayers: 12,
-    i18n: { en: { asset: "Galactic Faberge Egg", rarity: "Mythic", place: "Abyssal Reef" }, es: { asset: "Huevo Fabergé Galáctico", rarity: "Mítico", place: "Arrecife Abisal" } },
+    i18n: { en: { asset: "Galactic Faberge Egg", rarity: "Legendary", place: "Abyssal Reef" }, es: { asset: "Huevo Fabergé Galáctico", rarity: "Legendario", place: "Arrecife Abisal" } },
   };
   const out = await receiveEggAlert(db, c, body, net.fetchImpl, silent);
   assert.equal(out.ok, true);
@@ -79,53 +80,57 @@ test("alerta de huevo absurdo: imagen como adjunto, traducción, ¡Voy!, agarrad
   await wait(60);
   const post = net.calls.find((x) => x.method === "POST" && x.url.includes(`/channels/${c.discord.eggChannel}/messages`));
   assert.ok(post, "publicó en el canal de huevos");
-  assert.ok(post.body instanceof FormData, "la imagen va como adjunto");
-  const payload = JSON.parse(post.body.get("payload_json"));
-  assert.match(payload.content, /<@&1567693893963612250> 🥚 ¡Huevo ABSURDO en Arrecife Abisal!/);
-  assert.deepEqual(payload.allowed_mentions.roles, ["1567693893963612250"]);
-  assert.equal(payload.embeds[0].image.url, "attachment://egg.png");
-  assert.match(payload.embeds[0].description, /Huevo Fabergé Galáctico/);
-  assert.match(payload.embeds[0].description, /-# Galactic Faberge Egg \(Mythic\) just spawned on Abyssal Reef/); // línea en inglés
-  assert.match(payload.embeds[0].url, /gameInstanceId=abcdef12-3456/);
-  const ids = payload.components.flatMap((r) => r.components.map((b) => b.custom_id || b.url));
-  assert.ok(ids.includes(`egoing:${out.id}`) && ids.includes("estats") && ids.includes("eping") && ids.includes(`elang:${out.id}`));
-  // La imagen quedó guardada en la página.
-  assert.ok(sniffImage((await assetImage(db, c, 129186172275552, net.fetchImpl)).bytes));
+  assert.equal(typeof post.body, "string", "sin archivos adjuntos");
+  const p = JSON.parse(post.body);
+  assert.equal(p.content, "<@&1567693893963612250> 🥚 **ABSURD egg** on **Abyssal Reef**!");
+  assert.deepEqual(p.allowed_mentions.roles, ["1567693893963612250"]);
+  const e = p.embeds[0];
+  assert.equal(e.title, "🥚 Galactic Faberge Egg");
+  assert.equal(e.thumbnail.url, "https://skyeggs.pro/api/media/asset/129186172275552"); // ícono dentro del mensaje
+  assert.match(e.description, /🟡 Legendary · ⚖️ \*\*812 kg\*\*/);
+  assert.match(e.description, /📍 \*\*Abyssal Reef\*\* · 👥 \*\*1\/12\*\*/); // jugadores reales del último /pull
+  assert.ok(!JSON.stringify(e).includes("2.5M"), "sin el valor");
+  assert.equal(e.fields, undefined, "compacto: sin campos");
+  const ids = p.components.flatMap((r) => r.components.map((b) => b.custom_id));
+  assert.deepEqual(ids, [`ejoin:${out.id}`, "eping"]);
 
-  // ¡Voy! actualiza el contador en el mensaje público y confirma en privado.
-  const press = (custom_id, locale = "es-ES", user = "42") => handleEggButton(db, c, { data: { custom_id }, locale, member: { user: { id: user }, roles: [] }, message: { embeds: [{ image: { url: "https://cdn.discordapp.com/egg.png" } }] } }, net.fetchImpl);
-  const go = await press(`egoing:${out.id}`);
-  assert.equal(go.type, 7);
-  assert.match(go.followup, /Anotado/);
-  assert.ok(go.data.components[0].components.some((b) => b.label === "¡Voy! · 1"));
-  assert.deepEqual(go.data.attachments, [{ id: "att1" }]);
-  // En mi idioma: copia privada en portugués e inglés.
-  const pt = await press(`elang:${out.id}`, "pt-BR");
-  assert.equal(pt.data.flags, 64);
-  assert.match(pt.data.embeds[0].title, /Ovo ABSURDO apareceu/);
-  const en = await press(`elang:${out.id}`, "en-US");
-  assert.match(en.data.embeds[0].description, /Abyssal Reef/);
-  // Egg Ping: pone el rol.
-  const ping = await press("eping");
-  assert.match(ping.data.content, /te avisaremos/);
+  const press = (custom_id, locale = "es-ES", user = "42") => handleEggButton(db, c, { data: { custom_id }, locale, member: { user: { id: user }, roles: [] } }, net.fetchImpl);
+  // Unirse: hay espacio → enlace privado y cuenta como "va en camino" (una sola vez por persona).
+  const join = await press(`ejoin:${out.id}`);
+  assert.equal(join.data.flags, 64);
+  assert.match(join.data.content, /Hay espacio/);
+  assert.match(join.data.components[0].components[0].url, /gameInstanceId=abcdef12-3456/);
+  await press(`ejoin:${out.id}`);
+  await wait(30);
+  const edit = JSON.parse(net.calls.filter((x) => x.method === "PATCH").pop().body);
+  assert.equal(edit.components[0].components[0].label, "Join · 1 going");
+  // Servidor lleno: no da el enlace.
+  gamePull(db, c, { jobId: "abcdef12-3456", players: Array.from({ length: 12 }, (_, i) => ({ userId: 100 + i, name: `P${i}x`, displayName: `P${i}`, level: 30 })) });
+  const full = await press(`ejoin:${out.id}`, "en-US", "50");
+  assert.match(full.data.content, /full.*12\/12/);
+  assert.equal(full.data.components, undefined);
+  // Egg Ping: pone el rol (en portugués).
+  const ping = await press("eping", "pt-BR");
+  assert.match(ping.data.content, /Egg Ping ativado/);
   assert.ok(net.calls.some((x) => x.method === "PUT" && x.url.endsWith("/members/42/roles/1567693893963612250")));
+  // Botones de la versión anterior.
+  assert.match((await press("estats")).data.content, /ya no se usa/);
 
-  // Alguien lo agarra: el mensaje cambia.
+  // Alguien lo agarra: el mensaje cambia y queda solo Egg Ping.
   assert.equal((await updateEggAlert(db, c, { key: "job-1:1", status: "grabbed", by: { userId: 9, name: "pepito", displayName: "Pepito" } }, net.fetchImpl)).ok, true);
   await wait(30);
-  const edit = net.calls.filter((x) => x.method === "PATCH").pop();
-  const ep = JSON.parse(edit.body);
-  assert.match(ep.embeds[0].title, /Pepito agarró el huevo ABSURDO/);
-  assert.ok(!ep.components.some((r) => r.components.some((b) => b.style === 5)), "sin botón de unirse");
-  assert.deepEqual(ep.attachments, [{ id: "att1" }]);
-  const late = await press(`egoing:${out.id}`, "es-ES", "43");
-  assert.match(late.data.content, /ya no está/);
-  // Estadísticas.
-  const st = await press("estats", "en-US");
-  assert.equal(st.data.embeds[0].fields.find((f) => f.name === "Last 24 h").value, "1");
-  assert.equal(st.data.embeds[0].fields.find((f) => f.name === "Grabbed").value, "100%");
-  // Alertas viejas de servidores cerrados pasan a "se fue".
-  await receiveEggAlert(db, c, { ...body, key: "job-2:1" }, net.fetchImpl, silent, Date.now() - 3 * 3600_000);
+  const ep = JSON.parse(net.calls.filter((x) => x.method === "PATCH").pop().body);
+  assert.equal(ep.embeds[0].title, "✅ Grabbed by Pepito");
+  assert.deepEqual(ep.components[0].components.map((b) => b.custom_id), ["eping"]);
+  assert.match((await press(`ejoin:${out.id}`, "es-ES", "43")).data.content, /ya no está/);
+  // Reenviar: borra el mensaje anterior y publica otro.
+  const before = net.calls.length;
+  const re = await resendEggAlert(db, c, out.id, net.fetchImpl, silent);
+  assert.equal(re.sent, true);
+  assert.ok(net.calls.slice(before).some((x) => x.method === "DELETE" && x.url.includes("/messages/")));
+  // Servidor que dejó de mandar /pull: la alerta pasa a "se fue".
+  await receiveEggAlert(db, c, { ...body, key: "job-2:1", jobId: "viejo-1234" }, net.fetchImpl, silent, Date.now() - 30 * 60_000);
+  db.prepare("INSERT INTO live_servers (job_id, players, last_pull) VALUES ('viejo-1234', 3, ?)").run(Date.now() - 20 * 60_000);
   assert.equal(expireOldAlerts(db).length, 1);
 });
 
@@ -144,18 +149,26 @@ test("anuncio del video aprobado y botón de me gusta", async () => {
   assert.equal((await announceVideo(db, c, ev.id, net.fetchImpl, silent)).reason, "done");
   const post = net.calls.find((x) => x.method === "POST" && x.url.includes(`/channels/${c.discord.videoChannel}/messages`));
   const p = JSON.parse(post.body);
-  assert.equal(p.embeds[0].image.url, "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg");
-  assert.equal(p.embeds[0].author.icon_url, "https://tr.rbxcdn.com/face.png");
-  assert.match(p.embeds[0].title, /Encontré un huevo ABSURDO/);
-  assert.equal(p.embeds[0].fields.find((f) => f.name.endsWith("Vistas")).value, "**3.2K**");
-  assert.ok(p.components[1].components.some((b) => b.custom_id === `vlike:${ev.id}`));
-  assert.ok(net.calls.some((x) => x.url.includes("/reactions/")));
+  const v = p.embeds[0];
+  assert.equal(v.image.url, "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg");
+  assert.equal(v.author.icon_url, "https://tr.rbxcdn.com/face.png");
+  assert.equal(v.author.name, "Luna posted a new video");
+  assert.equal(v.title, "Encontré un huevo ABSURDO");
+  assert.match(v.description, /^📺 YouTube · 👀 \*\*3.2K\*\* views · <t:\d+:R>$/);
+  assert.equal(v.fields, undefined, "compacto: sin rango ni campos");
+  assert.equal(p.content, undefined, "sin texto extra cuando no hay rol de avisos");
+  assert.deepEqual(p.components[0].components.map((b) => b.custom_id || b.label), ["Watch", `vlike:${ev.id}`, `vstats:${ev.id}`, "Play Sky Eggs"]);
+  assert.ok(!net.calls.some((x) => x.url.includes("/reactions/")));
   const like = await handleVideoButton(db, c, { data: { custom_id: `vlike:${ev.id}` }, locale: "es-ES", member: { user: { id: "77" } }, message: { embeds: [{}] } }, net.fetchImpl);
   assert.equal(like.type, 7);
-  assert.ok(like.data.components[1].components.some((b) => b.label === "Me gusta · 1"));
+  assert.equal(like.data.components[0].components[1].label, "1");
+  const again = await resendVideo(db, c, ev.id, net.fetchImpl, silent);
+  assert.equal(again.sent, true);
+  assert.ok(net.calls.some((x) => x.method === "DELETE"));
   const stats = await handleVideoButton(db, c, { data: { custom_id: `vstats:${ev.id}` }, locale: "en-US", member: { user: { id: "77" } } }, net.fetchImpl);
   assert.equal(stats.data.flags, 64);
   assert.match(stats.data.embeds[0].title, /More from this creator: Luna/);
+  assert.ok(!stats.data.embeds[0].fields.some((f) => /Rank/.test(f.name)));
 });
 
 test("HTTP: botones firmados, alerta desde el juego y catálogo de imágenes", async () => {

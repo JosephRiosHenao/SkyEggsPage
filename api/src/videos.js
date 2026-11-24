@@ -2,19 +2,15 @@
 // Mensaje con miniatura, creador (foto de Roblox, rango con su color), red, vistas que se actualizan
 // solas, botones de enlace (ver video, jugar, perfil, ser creador) y botones para todos los miembros:
 // ❤️ Me gusta (contador), 📊 Más de este creador (respuesta privada) y 🔔 Avisos de videos (rol opcional).
-import { LEVELS } from "./program.js";
-import { tierOf } from "./lifecycle.js";
 import { avatars } from "./roblox.js";
 import { youtubeId } from "./views.js";
-import { sendMessage, editMessage, addReaction, interactionsEnabled, linkButton, actionButton, row, ephemeral, short, safe, isSnowflake, langOf, toggleRole, REPLY } from "./bot.js";
+import { sendMessage, editMessage, deleteMessage, interactionsEnabled, linkButton, actionButton, row, ephemeral, short, safe, isSnowflake, langOf, toggleRole, REPLY } from "./bot.js";
 import { botEnabled } from "./discord.js";
 
-const LEVEL_BY_KEY = Object.fromEntries(LEVELS.map((l) => [l.key, l]));
 const PLATFORM = {
   YouTube: { emoji: "📺", color: 0xff2d2d }, TikTok: { emoji: "🎵", color: 0x111111 }, Twitch: { emoji: "🟣", color: 0x9146ff },
   Kick: { emoji: "🟩", color: 0x53fc18 }, Instagram: { emoji: "📸", color: 0xe1306c }, Facebook: { emoji: "📘", color: 0x1877f2 }, Otra: { emoji: "🔗", color: 0x4fb4ff },
 };
-const hex = (c) => parseInt(String(c || "#4FB4FF").replace("#", ""), 16);
 const gameUrl = (cfg) => `https://www.roblox.com/games/${cfg.roblox?.placeId || "77372347150746"}`;
 
 function videoData(db, evidenceId) {
@@ -34,48 +30,31 @@ function thumbnailOf(cfg, e, meta) {
   return `${cfg.siteUrl}/img/og.jpg`;
 }
 
+// Mensaje público compacto (en inglés: Discord no deja mostrar un texto distinto a cada persona).
+// Creador con su foto, título del video, una línea con red · vistas · fecha y la miniatura grande.
 export function buildVideoMessage(cfg, data, avatarUrl) {
   const { e, c, d, meta, likes } = data;
-  const lv = LEVEL_BY_KEY[tierOf(c)] || LEVELS[0];
   const plat = PLATFORM[e.platform] || PLATFORM.Otra;
-  const name = safe(c?.roblox_display || c?.roblox_name || d?.global_name || d?.username || "Creador", 40);
-  const title = safe(e.title || meta.title || (e.kind === "live" ? "Directo de Sky Eggs" : "Nuevo video de Sky Eggs"), 200);
+  const name = safe(c?.roblox_display || c?.roblox_name || d?.global_name || d?.username || "Creator", 40);
+  const title = safe(e.title || meta.title || (e.kind === "live" ? "Sky Eggs livestream" : "Sky Eggs video"), 200);
   const published = Date.parse(`${e.published_on}T12:00:00-05:00`);
-  const fields = [
-    { name: `${plat.emoji} Red`, value: e.platform, inline: true },
-    { name: `${lv.emoji} Rango`, value: lv.name, inline: true },
-    { name: "👀 Vistas", value: `**${short(e.views)}**${e.track === "auto" ? "\n🔄 se actualizan solas" : ""}`, inline: true },
-    { name: "📅 Publicado", value: Number.isFinite(published) ? `<t:${Math.floor(published / 1000)}:D>` : e.published_on, inline: true },
-  ];
-  if (meta.channel) fields.push({ name: "🎬 Canal", value: meta.channelUrl ? `[${safe(meta.channel, 60)}](${meta.channelUrl})` : safe(meta.channel, 60), inline: true });
-  if (meta.duration) fields.push({ name: "⏱️ Duración", value: meta.duration >= 3600 ? `${Math.floor(meta.duration / 3600)} h ${Math.floor((meta.duration % 3600) / 60)} min` : `${Math.floor(meta.duration / 60)}:${String(meta.duration % 60).padStart(2, "0")}`, inline: true });
-  if (likes) fields.push({ name: "❤️ Me gusta", value: String(likes), inline: true });
   const embed = {
-    author: { name: `${name} · ${lv.name}`, ...(c?.roblox_user_id ? { url: `https://www.roblox.com/users/${c.roblox_user_id}/profile` } : {}), ...(avatarUrl ? { icon_url: avatarUrl } : {}) },
-    title: `${e.kind === "live" ? "🔴" : "🎬"} ${title}`,
+    author: { name: `${name} ${e.kind === "live" ? "went live" : "posted a new video"}`, ...(c?.roblox_user_id ? { url: `https://www.roblox.com/users/${c.roblox_user_id}/profile` } : {}), ...(avatarUrl ? { icon_url: avatarUrl } : {}) },
+    title: `${e.kind === "live" ? "🔴 " : ""}${title}`,
     url: e.url,
-    description: `¡**${name}** ${e.kind === "live" ? "hizo un directo" : "subió un video nuevo"} de **Sky Eggs**! Míralo, déjale un me gusta y compártelo 💛`,
-    color: hex(lv.color) || plat.color,
-    fields,
+    description: [`${plat.emoji} ${e.platform}`, `👀 **${short(e.views)}** views`, Number.isFinite(published) ? `<t:${Math.floor(published / 1000)}:R>` : null].filter(Boolean).join(" · "),
+    color: plat.color,
     image: { url: thumbnailOf(cfg, e, meta) },
-    ...(avatarUrl ? { thumbnail: { url: avatarUrl } } : {}),
-    footer: { text: "Sky Eggs · Programa de Creadores" },
-    timestamp: new Date(e.reviewed_at || Date.now()).toISOString(),
+    footer: { text: "Sky Eggs · Creators" },
   };
-  const components = [row(
-    linkButton(e.kind === "live" ? "Ver directo" : "Ver video", e.url, "▶️"),
-    linkButton("Jugar Sky Eggs", gameUrl(cfg), "🎮"),
-    c?.roblox_user_id ? linkButton("Perfil de Roblox", `https://www.roblox.com/users/${c.roblox_user_id}/profile`, "👤") : null,
-    linkButton("Ser creador", `${cfg.siteUrl}/creadores/`, "🎥"),
-  )];
+  const buttons = [linkButton(e.kind === "live" ? "Watch live" : "Watch", e.url, "▶️")];
   if (interactionsEnabled(cfg)) {
-    components.push(row(
-      actionButton(likes ? `Me gusta · ${likes}` : "Me gusta", `vlike:${e.id}`, 2, "❤️"),
-      actionButton("Más de este creador", `vstats:${e.id}`, 2, "📊"),
-      isSnowflake(cfg.discord.videoPingRole) ? actionButton("Avisarme de videos", "vping", 2, "🔔") : null,
-    ));
+    buttons.push(actionButton(likes ? String(likes) : "Like", `vlike:${e.id}`, 2, "❤️"));
+    buttons.push(actionButton(`More from ${name}`.slice(0, 80), `vstats:${e.id}`, 2, "📺"));
+    if (isSnowflake(cfg.discord.videoPingRole)) buttons.push(actionButton("Video alerts on/off", "vping", 2, "🔔"));
   }
-  return { embeds: [embed], components };
+  buttons.push(linkButton("Play Sky Eggs", gameUrl(cfg), "🎮"));
+  return { embeds: [embed], components: [row(...buttons.slice(0, 5))] };
 }
 
 // Publica el anuncio (una sola vez por evidencia). Nunca lanza.
@@ -91,7 +70,7 @@ export async function announceVideo(db, cfg, evidenceId, fetchImpl = fetch, log 
     }
     const payload = buildVideoMessage(cfg, data, avatarUrl);
     const ping = isSnowflake(cfg.discord.videoPingRole) ? cfg.discord.videoPingRole : null;
-    payload.content = `${ping ? `<@&${ping}> ` : ""}🎬 ¡Nuevo ${data.e.kind === "live" ? "directo" : "video"} de Sky Eggs!`;
+    if (ping) payload.content = `<@&${ping}> 🎬 New Sky Eggs ${data.e.kind === "live" ? "livestream" : "video"}!`;
     payload.allowed_mentions = { parse: [], roles: ping ? [ping] : [] };
     const r = await sendMessage(cfg, cfg.discord.videoChannel, payload, { fetchImpl });
     if (!r.ok) {
@@ -101,13 +80,20 @@ export async function announceVideo(db, cfg, evidenceId, fetchImpl = fetch, log 
     }
     db.prepare("UPDATE evidences SET announce_channel = ?, announce_msg = ?, announce_views = ?, announce_error = NULL WHERE id = ?")
       .run(cfg.discord.videoChannel, r.body.id, data.e.views, data.e.id);
-    // Reacciones rápidas para quien no use los botones.
-    for (const emoji of ["🔥", "🥚"]) await addReaction(cfg, cfg.discord.videoChannel, r.body.id, emoji, { fetchImpl });
     return { sent: true, messageId: r.body.id };
   } catch (err) {
     log.warn(`[videos] ${err.message}`);
     return { sent: false, reason: err.message };
   }
+}
+
+// Reenviar (para probar cambios): borra el anuncio anterior y publica de nuevo con el formato actual.
+export async function resendVideo(db, cfg, evidenceId, fetchImpl = fetch, log = console) {
+  const e = db.prepare("SELECT id, announce_channel, announce_msg FROM evidences WHERE id = ?").get(Number(evidenceId));
+  if (!e) return { sent: false, reason: "not_found" };
+  if (e.announce_msg && e.announce_channel) await deleteMessage(cfg, e.announce_channel, e.announce_msg, { fetchImpl });
+  db.prepare("UPDATE evidences SET announce_msg = NULL, announce_channel = NULL WHERE id = ?").run(e.id);
+  return announceVideo(db, cfg, e.id, fetchImpl, log);
 }
 
 // Vuelve a pintar el anuncio (vistas nuevas o me gusta). Mantiene la foto del creador que ya tenía.
@@ -177,15 +163,13 @@ export async function handleVideoButton(db, cfg, interaction, fetchImpl = fetch)
     const sum = (where, ...args) => db.prepare(`SELECT COALESCE(SUM(views),0) AS v, COUNT(*) AS n FROM evidences WHERE discord_id = ? AND status = 'approved' ${where}`).get(id, ...args);
     const total = sum("");
     const week = sum("AND week = ?", data.e.week);
-    const lv = LEVEL_BY_KEY[tierOf(data.c)] || LEVELS[0];
     const latest = db.prepare("SELECT title, url, platform, views FROM evidences WHERE discord_id = ? AND status = 'approved' ORDER BY published_on DESC, id DESC LIMIT 5").all(id);
     const app = db.prepare("SELECT platforms FROM applications WHERE discord_id = ? ORDER BY (status = 'approved') DESC, id DESC LIMIT 1").get(id);
     const socials = (() => { try { return JSON.parse(app?.platforms || "[]"); } catch { return []; } })().filter((p) => /^https?:\/\//.test(p.url)).slice(0, 6);
     const name = safe(data.c?.roblox_display || data.c?.roblox_name || "Creador", 40);
     const embed = {
-      title: `${t.stats}: ${name}`, color: hex(lv.color),
+      title: `${t.stats}: ${name}`, color: 0x4fb4ff, ...(data.c?.roblox_user_id ? { url: `https://www.roblox.com/users/${data.c.roblox_user_id}/profile` } : {}),
       fields: [
-        { name: t.rank, value: `${lv.emoji} ${lv.name}`, inline: true },
         { name: t.week, value: short(week.v), inline: true },
         { name: t.total, value: short(total.v), inline: true },
         { name: t.videos, value: String(total.n), inline: true },

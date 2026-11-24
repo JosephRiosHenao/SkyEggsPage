@@ -375,6 +375,8 @@ export function openDb(path) {
     );
     CREATE INDEX IF NOT EXISTS egg_alerts_time ON egg_alerts(created_at);
     CREATE TABLE IF NOT EXISTS egg_going (alert_id INTEGER NOT NULL, discord_id TEXT NOT NULL, PRIMARY KEY (alert_id, discord_id));
+    -- Servidores del juego vivos (cada /game/pull): para saber si hay espacio al tocar "Unirse".
+    CREATE TABLE IF NOT EXISTS live_servers (job_id TEXT PRIMARY KEY, players INTEGER NOT NULL, last_pull INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS video_likes (evidence_id INTEGER NOT NULL, discord_id TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (evidence_id, discord_id));
   `);
   for (const [c, def] of [["announce_channel", "TEXT"], ["announce_msg", "TEXT"], ["announce_views", "INTEGER"], ["announce_error", "TEXT"]])
