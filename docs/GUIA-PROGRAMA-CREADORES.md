@@ -86,6 +86,7 @@ Reglas: contenido de Sky Eggs, vistas reales (nada de bots), comandos con respet
    - Abre las redes del aspirante desde la tarjeta.
    - Escríbele por Discord (su usuario sale en la tarjeta) y marca **Contactado**.
    - Decide: **Aprobar** o **Rechazar** con una nota (en el rechazo es obligatoria).
+   - **¿Datos mal puestos?** Si la tarjeta marca "🔁 repetida" o "🎞️ un video en vez del canal", toca **✏️ Corregir datos**: quita las redes repetidas (botón *Quitar repetidas*), cambia el short o video por el enlace del canal (ej. `youtube.com/@usuario`), ajusta seguidores, video de ejemplo o correo y **Guardar cambios**. Funciona en cualquier estado; para un creador ya aprobado, en **Creadores y métricas → Ver → ✏️ Corregir redes**. Queda en el Registro con el antes y el después.
    - **Aprobar también confirma su cuenta de Roblox.** La tarjeta muestra la cuenta que eligió (enlace al perfil, desde cuándo juega, su nivel y la última vez que entró). Si dudas, pregúntale por Discord o búscalo en el juego.
    - Si apruebas: el nivel Creator del juego (tag + permisos de HD Admin) y el correo de bienvenida le llegan solos la próxima vez que entre. Con el bot configurado el rol **Content Creator** de Discord también se pone solo; si la página dice que no pudo, dáselo a mano. Pásale esta guía y dile que salga y vuelva a entrar al panel.
 3. **Vinculaciones** (cuando un creador cambia de cuenta)

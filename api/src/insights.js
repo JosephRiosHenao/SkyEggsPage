@@ -8,8 +8,11 @@ const LEVEL_BY_KEY = Object.fromEntries(LEVELS.map((l) => [l.key, l]));
 const parse = (s) => { try { return JSON.parse(s); } catch { return []; } };
 
 // Redes de la última solicitud aprobada (o la última enviada) de ese usuario de Discord.
+function applicationOf(db, discordId) {
+  return db.prepare("SELECT id, platforms, sample_url, email FROM applications WHERE discord_id = ? ORDER BY (status = 'approved') DESC, id DESC LIMIT 1").get(discordId);
+}
 function platformsOf(db, discordId) {
-  const a = db.prepare("SELECT platforms FROM applications WHERE discord_id = ? ORDER BY (status = 'approved') DESC, id DESC LIMIT 1").get(discordId);
+  const a = applicationOf(db, discordId);
   return a ? parse(a.platforms).filter((p) => p && /^https?:\/\//.test(p.url)) : [];
 }
 
@@ -71,6 +74,7 @@ export function creatorsDashboard(db, cfg, now = Date.now()) {
       tierChangedAt: c.tier_changed_at, publicProfile: c.public_profile !== 0,
       level: c.level, lastSeen: c.last_seen, firstSeen: c.first_seen,
       platforms: platformsOf(db, id),
+      application: (() => { const a = applicationOf(db, id); return a ? { id: a.id, sampleUrl: a.sample_url, email: a.email } : null; })(),
       weekViews: wk.v, weekVideos, prevWeekViews: pw.v, monthViews: mo.v, monthVideos: mo.n,
       totalViews: total.v, totalVideos: total.n, lastVideo: last, pendingEvidences: pending,
       robuxPaid: robux.paid, robuxOpen: robux.open, claims: claims.n, lastPack: claims.last,

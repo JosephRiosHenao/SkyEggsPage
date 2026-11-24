@@ -205,6 +205,8 @@ export function openDb(path) {
     ["auto_error", "TEXT"], ["auto_fails", "INTEGER NOT NULL DEFAULT 0"], ["auto_meta", "TEXT"], ["track_until", "INTEGER"],
   ]) if (!evCols().includes(c)) db.exec(`ALTER TABLE evidences ADD COLUMN ${c} ${def}`);
   if (!cols("applications").includes("roblox_user_id")) db.exec("ALTER TABLE applications ADD COLUMN roblox_user_id INTEGER");
+  // Correcciones de un moderador (redes repetidas, un video en vez del canal…).
+  for (const [c, def] of [["edited_by", "TEXT"], ["edited_at", "INTEGER"]]) if (!cols("applications").includes(c)) db.exec(`ALTER TABLE applications ADD COLUMN ${c} ${def}`);
 
   // ---------- Rangos automáticos, avisos al buzón y creadores antiguos ----------
   // players.creator_tier: nivel de creador que el juego reporta en cada pull (0 = ninguno, 1 = Creator … 5 = Elite).

@@ -77,6 +77,7 @@
     bad_tier: "Ese rango no existe.",
     same_tier: "Ya tiene ese rango.",
     must_reapply: "Saliste del programa: envía una solicitud nueva en la pestaña Aplicar.",
+    no_changes: "No cambiaste nada.",
   };
   const LOGIN_ERRORS = {
     discord_off: "El login con Discord todavía no está configurado. Avísale al admin.",
@@ -230,8 +231,10 @@
     window.scrollTo({ top: 0 });
   }
   // Página de moderación: tarjeta con título y la vista dentro.
-  const modPage = (fn, desc) => async (s) => {
+  // Con bare = true la vista arma sus propias tarjetas (p. ej. Creadores y métricas).
+  const modPage = (fn, desc, bare) => async (s) => {
     await loadQueue();
+    if (bare) return fn(s);
     const body = el("div");
     s.replaceChildren(el("div", { class: "box" }, desc ? el("p", { class: "small muted" }, desc) : null, body));
     await fn(body);
@@ -506,7 +509,7 @@
     "mod-evidencias": modPage((b) => modEvidences(b), "Videos y directos por revisar, y recuentos de vistas."),
     "mod-bonos": modPage((b) => modBonuses(b, isAdmin()), "Bonos de Robux por video (moderador y luego admin)."),
     "mod-especiales": modPage((b) => modSpecials(b), "Pedidos especiales de creadores con 100.000 vistas al mes."),
-    "mod-creadores": modPage((b) => modCreators(b)),
+    "mod-creadores": modPage((b) => modCreators(b), null, true),
     "mod-avisos": modPage((b) => modNotices(b)),
     "mod-antiguos": modPage((b) => modLegacy(b)),
     "mod-registro": modPage((b) => modAudit(b), "Todo lo que hace el staff en esta página, con nombre y hora."),
@@ -577,6 +580,141 @@
   const robloxLine = (id, name, display, player) => el("p", { class: "item__meta" }, "Roblox: ",
     link(`https://www.roblox.com/users/${id}/profile`, `@${name}${display && display !== name ? ` (${display})` : ""}`),
     ` · id ${id}`, player ? ` · juega desde ${day2(player.firstSeen)} · nivel ${player.level ?? "?"} · última vez ${day2(player.lastSeen)}` : "");
+  // Lo mismo, pero como trozos para meterlos en una ficha.
+  const robloxBits = (id, name, display, player) => [
+    link(`https://www.roblox.com/users/${id}/profile`, `@${name}${display && display !== name ? ` (${display})` : ""}`),
+    el("span", { class: "sub" }, player ? `juega desde ${day2(player.firstSeen)} · nivel ${player.level ?? "?"} · última vez ${day2(player.lastSeen)}` : `id ${id}`)];
+
+  // ---------- Redes: fichas de colores, repetidas y videos sueltos ----------
+  const PLAT_SHORT = { YouTube: "YT", TikTok: "TT", Twitch: "TW", Kick: "K", Instagram: "IG", Facebook: "FB", Otra: "🔗" };
+  const PLATFORM_LIST = Object.keys(PLAT_SHORT);
+  const compact = new Intl.NumberFormat("es-CO", { notation: "compact", maximumFractionDigits: 1 });
+  // Igual que canonicalUrl de la API: sin ?_r=…&_t=…, sin www. ni "/" final.
+  function canonicalUrl(url) {
+    try {
+      const u = new URL(url);
+      const host = u.hostname.replace(/^(www|m)\./, "").toLowerCase();
+      const keep = host.includes("youtube.com") && u.pathname === "/watch" ? `?v=${u.searchParams.get("v") || ""}` : "";
+      return `${host}${u.pathname.replace(/\/+$/, "").toLowerCase()}${keep}`;
+    } catch { return String(url || "").trim().toLowerCase(); }
+  }
+  // Igual que looksLikeVideo de la API: un video o short suelto en vez del canal.
+  function looksLikeVideo(url) {
+    try {
+      const u = new URL(url);
+      const h = u.hostname.replace(/^(www|m)\./, "");
+      if (h === "youtu.be") return true;
+      if (h.endsWith("youtube.com")) return /^\/(shorts|watch|live|embed)\b/.test(u.pathname);
+      if (h.endsWith("tiktok.com")) return /\/video\/|\/photo\//.test(u.pathname) || h.startsWith("vm.") || h.startsWith("vt.");
+      if (h.endsWith("twitch.tv")) return /^\/videos\/|\/clip\//.test(u.pathname) || h.startsWith("clips.");
+      if (h.endsWith("kick.com")) return /\/videos?\/|\/clips?\//.test(u.pathname);
+      if (h.endsWith("instagram.com")) return /^\/(p|reel|reels|tv)\//.test(u.pathname);
+      if (h.endsWith("facebook.com")) return /\/videos\/|\/reel\/|^\/watch/.test(u.pathname);
+    } catch { /* enlace raro */ }
+    return false;
+  }
+  const platType = (t) => (PLAT_SHORT[t] ? t : "Otra");
+  const platChip = (p) => el("a", { class: `plat plat--${platType(p.type)}${looksLikeVideo(p.url) ? " is-video" : ""}`, href: p.url, target: "_blank", rel: "noopener noreferrer nofollow", title: p.url },
+    el("span", { class: "plat__tag", "aria-hidden": "true" }, PLAT_SHORT[platType(p.type)]), p.type,
+    p.followers ? el("span", { class: "plat__n" }, compact.format(p.followers)) : null);
+  const platChips = (list) => (list.length ? el("div", { class: "plats" }, ...list.map(platChip)) : "—");
+  const flag = (text, title) => el("span", { class: "flag", title }, text);
+  // Cuántas redes repetidas y cuántos videos sueltos hay (para avisar al moderador).
+  function platIssues(list) {
+    const seen = new Set(); let dups = 0, videos = 0;
+    for (const p of list) { const k = canonicalUrl(p.url); if (seen.has(k)) dups++; else seen.add(k); if (looksLikeVideo(p.url)) videos++; }
+    return { dups, videos };
+  }
+  const issueFlags = (list, sample) => {
+    const { dups, videos } = platIssues(list);
+    return [dups ? flag(`🔁 ${dups} repetida${dups > 1 ? "s" : ""}`, "La misma red está pegada más de una vez") : null,
+      videos ? flag(`🎞️ ${videos === 1 ? "Un video" : `${videos} videos`} en vez del canal`, "Pegó el enlace de un video o short, no el de su canal") : null];
+  };
+  // Lista de redes con su enlace completo y avisos por fila.
+  function platList(list) {
+    const seen = new Set();
+    return el("ul", { class: "plat-list" }, ...list.map((p) => {
+      const k = canonicalUrl(p.url); const dup = seen.has(k); seen.add(k);
+      return el("li", {}, platChip(p), el("a", { class: "plat__url", href: p.url, target: "_blank", rel: "noopener noreferrer nofollow" }, p.url.replace(/^https?:\/\/(www\.)?/, "").replace(/\?.*$/, "")),
+        dup ? flag("🔁 Repetida") : null, looksLikeVideo(p.url) ? flag("🎞️ Es un video, no el canal") : null);
+    }));
+  }
+  // Huevo con la inicial y un color fijo por persona.
+  const EGG_COLORS = ["#4FB4FF", "#FF6FAE", "#3FC35A", "#FFB020", "#C77DFF", "#FF8A3D", "#2DD4BF"];
+  function egg(name, small) {
+    const txt = String(name || "?").replace(/^[@#]/, "");
+    let h = 0; for (const ch of txt) h = (h * 31 + ch.codePointAt(0)) >>> 0;
+    const node = el("span", { class: `egg${small ? " egg--sm" : ""}`, "aria-hidden": "true" }, [...txt][0]?.toUpperCase() || "?");
+    node.style.setProperty("--egg", EGG_COLORS[h % EGG_COLORS.length]);
+    return node;
+  }
+
+  // Editor del moderador: corrige redes (repetidas, un short en vez del canal), video de ejemplo y correo.
+  // app = { id, platforms, sample_url, email }. Queda en el Registro con el antes y el después.
+  function appEditor(app, onDone) {
+    const rowsBox = el("div", { class: "list" });
+    const rowState = [];
+    const check = () => {
+      const seen = new Set();
+      for (const r of rowState) {
+        const url = r.url.value.trim();
+        const k = canonicalUrl(url);
+        const dup = url && seen.has(k); if (url) seen.add(k);
+        const video = url && looksLikeVideo(url);
+        r.row.classList.toggle("is-dup", Boolean(dup)); r.row.classList.toggle("is-video", Boolean(video));
+        r.flags.replaceChildren(...[dup ? flag("🔁 Repetida: se quita al guardar") : null, video ? flag("🎞️ Parece un video o short: pon el enlace del canal (ej. youtube.com/@usuario)") : null].filter(Boolean));
+      }
+    };
+    const addRow = (p = { type: "YouTube", url: "", followers: 0 }) => {
+      const type = el("select", { "aria-label": "Red" }, ...PLATFORM_LIST.map((t) => el("option", { value: t, selected: t === platType(p.type) }, t)));
+      const url = el("input", { type: "url", value: p.url || "", placeholder: "https://… (enlace del canal)", "aria-label": "Enlace del canal", maxlength: "400" });
+      const followers = el("input", { type: "number", min: "0", value: p.followers ? String(p.followers) : "", placeholder: "Seguidores", "aria-label": "Seguidores" });
+      const flags = el("div", { class: "prow__flags" });
+      const r = { type, url, followers, flags };
+      const del = el("button", { class: "icon-btn", type: "button", title: "Quitar esta red", "aria-label": "Quitar esta red", onclick: () => { rowState.splice(rowState.indexOf(r), 1); r.row.remove(); check(); } }, "🗑️");
+      r.row = el("div", { class: "prow" }, type, url, followers, del, flags);
+      url.addEventListener("input", check);
+      rowState.push(r); rowsBox.append(r.row);
+    };
+    for (const p of app.platforms || []) addRow(p);
+    if (!rowState.length) addRow();
+    const dedupe = () => {
+      const seen = new Map();
+      for (const r of [...rowState]) {
+        const k = canonicalUrl(r.url.value.trim());
+        if (!r.url.value.trim()) continue;
+        const first = seen.get(k);
+        if (first) {
+          first.followers.value = String(Math.max(Number(first.followers.value) || 0, Number(r.followers.value) || 0) || "");
+          rowState.splice(rowState.indexOf(r), 1); r.row.remove();
+        } else seen.set(k, r);
+      }
+      check();
+    };
+    const sample = el("input", { type: "url", value: app.sample_url || "", placeholder: "https://… (opcional)", maxlength: "400" });
+    const email = el("input", { type: "email", value: app.email || "", placeholder: "correo@ejemplo.com (opcional)", maxlength: "120" });
+    const note = noteInput("Qué corregiste (opcional, queda en el registro)");
+    const box = el("div", { class: "editor" },
+      el("h3", { class: "editor__title" }, "✏️ Corregir datos de la solicitud"),
+      el("p", { class: "hint" }, "Quita redes repetidas o cambia un video suelto por el enlace de su canal. El creador no recibe aviso; el cambio queda en el Registro con tu nombre."),
+      rowsBox,
+      el("div", { class: "form-actions" },
+        el("button", { class: "btn btn--mini btn--white", type: "button", onclick: () => { if (rowState.length >= 6) return flash("Máximo 6 redes.", "bad"); addRow(); } }, "➕ Agregar red"),
+        el("button", { class: "btn btn--mini btn--white", type: "button", onclick: dedupe }, "🔁 Quitar repetidas")),
+      el("div", { class: "row" },
+        el("label", { class: "form" }, el("span", { class: "field__label" }, "Video de ejemplo"), sample),
+        el("label", { class: "form" }, el("span", { class: "field__label" }, "Correo"), email)),
+      el("div", { class: "form-actions" }, note,
+        btn("Guardar cambios", "btn--green", (b) => {
+          const platforms = rowState.map((r) => ({ type: r.type.value, url: r.url.value.trim(), followers: Number(r.followers.value) || 0 })).filter((p) => p.url);
+          if (!platforms.length) return flash(ERRORS.need_platform, "bad");
+          act(b, () => api("/api/mod/application/edit", { id: app.id, platforms, sampleUrl: sample.value.trim(), email: email.value.trim(), note: note.value }), "Datos corregidos. El cambio quedó en el Registro.", onDone);
+        }),
+        btn("Cancelar", "btn--white", () => box.remove())));
+    check();
+    return box;
+  }
+
   const refreshMod = () => show(current);
   const noteInput = (ph = "Nota (se guarda en el registro)") => el("input", { class: "wide", placeholder: ph, maxlength: "500" });
   const btn = (text, cls, fn) => el("button", { class: `btn btn--mini ${cls}`, type: "button", onclick: (e) => fn(e.currentTarget) }, text);
@@ -585,18 +723,28 @@
   function modApplications(body) {
     const items = queue.applications.map((a) => {
       const note = noteInput();
-      return el("article", { class: "item" },
-        el("div", { class: "item__head" }, el("span", { class: "item__title" }, `${userLine(a.user)}`), pill(a.status, a.status === "contacted" ? "Contactado" : "Nueva")),
-        a.roblox_user_id ? robloxLine(a.roblox_user_id, a.roblox_name, null, a.player) : el("p", { class: "item__meta" }, `Roblox: ${a.roblox_name}`),
-        el("p", { class: "item__meta" }, `${a.email ? `${a.email} · ` : ""}enviada ${when(a.created_at)}`),
-        el("ul", { class: "item__meta" }, ...a.platforms.map((p) => el("li", {}, `${p.type}: `, link(p.url, p.url), p.followers ? ` · ${n(p.followers)} seguidores` : ""))),
-        a.sample_url ? el("p", { class: "item__meta" }, "Video de ejemplo: ", link(a.sample_url, a.sample_url)) : null,
-        el("p", { class: "item__meta" }, a.about),
+      const editSlot = el("div");
+      const name = a.user ? a.user.globalName || a.user.username : "?";
+      const field = (label, ...value) => el("div", { class: "field" }, el("span", { class: "field__label" }, label), el("div", { class: "field__value" }, ...value));
+      return el("article", { class: "item app-card" },
+        el("div", { class: "item__head" },
+          el("div", { class: "app-card__who" }, egg(name),
+            el("div", {}, el("span", { class: "item__title" }, name), el("p", { class: "item__meta" }, a.user ? `Discord @${a.user.username}` : "usuario desconocido"))),
+          el("div", { class: "inline" }, ...issueFlags(a.platforms).filter(Boolean), pill(a.status, a.status === "contacted" ? "Contactado" : "Nueva"))),
+        el("div", { class: "app-card__grid" },
+          field("Roblox", ...(a.roblox_user_id ? robloxBits(a.roblox_user_id, a.roblox_name, null, a.player) : [a.roblox_name])),
+          field("Enviada", when(a.created_at), a.email ? el("span", { class: "sub" }, a.email) : el("span", { class: "sub" }, "sin correo")),
+          a.sample_url ? field("Video de ejemplo", el("a", { href: a.sample_url, target: "_blank", rel: "noopener noreferrer nofollow" }, a.sample_url.replace(/^https?:\/\/(www\.)?/, "").replace(/\?.*$/, ""))) : null),
+        field("Redes", platList(a.platforms)),
+        el("blockquote", { class: "quote" }, a.about),
         a.review_note ? el("p", { class: "item__meta" }, `Nota (${a.reviewed_by}): ${a.review_note}`) : null,
+        a.edited_by ? el("p", { class: "edited" }, `✏️ Datos corregidos por ${a.edited_by} · ${when(a.edited_at)}`) : null,
+        editSlot,
         el("div", { class: "item__actions" }, note,
           a.status === "pending" ? btn("Contactado", "btn--white", (b) => act(b, () => api("/api/mod/application", { id: a.id, action: "contacted", note: note.value }), "Marcada como contactada.", refreshMod)) : null,
           btn("Aprobar (y confirmar su Roblox)", "btn--green", (b) => act(b, () => api("/api/mod/application", { id: a.id, action: "approve", note: note.value }), (o) => `Aprobada${o.linked ? " y cuenta de Roblox vinculada" : ""}. ${o.discordRole === "ok" ? "El rol de Content Creator se puso solo en Discord." : o.discordRole === "error" ? "No se pudo poner el rol en Discord: dáselo a mano." : "Dale el rol de Content Creator en Discord."} El rango Creator y el correo de bienvenida llegan solos al juego.`, refreshMod)),
-          btn("Rechazar", "btn--red", (b) => { if (!note.value.trim()) return flash("Escribe el motivo en la nota.", "bad"); act(b, () => api("/api/mod/application", { id: a.id, action: "reject", note: note.value }), (o) => `Rechazada.${o.discordRole === "removed" ? " Se le quitó el rol de Content Creator en Discord." : o.discordRole === "error" ? " No se pudo quitar el rol en Discord: hazlo a mano si lo tenía." : ""} Si tenía rango en el juego, se le quita al entrar.`, refreshMod); })));
+          btn("Rechazar", "btn--red", (b) => { if (!note.value.trim()) return flash("Escribe el motivo en la nota.", "bad"); act(b, () => api("/api/mod/application", { id: a.id, action: "reject", note: note.value }), (o) => `Rechazada.${o.discordRole === "removed" ? " Se le quitó el rol de Content Creator en Discord." : o.discordRole === "error" ? " No se pudo quitar el rol en Discord: hazlo a mano si lo tenía." : ""} Si tenía rango en el juego, se le quita al entrar.`, refreshMod); }),
+          btn("✏️ Corregir datos", "btn--white", () => { if (!editSlot.firstChild?.isConnected) editSlot.replaceChildren(appEditor(a, refreshMod)); editSlot.firstChild.scrollIntoView({ block: "nearest", behavior: "smooth" }); })));
     });
     body.replaceChildren(...(items.length ? [el("div", { class: "list" }, ...items)] : [empty("No hay solicitudes pendientes.")]));
   }
@@ -732,14 +880,21 @@
     requestAnimationFrame(() => { for (const b of row.querySelectorAll(".bars__bar")) b.style.height = `${b.dataset.h}%`; });
     return fig;
   }
+  const rankChip = (key, prefix = "") => {
+    const lv = key && levelOf(key);
+    const chip = el("span", { class: "rank" }, `${prefix}${lv ? `${lv.emoji} ${lv.name}` : levelName(key)}`);
+    if (lv) chip.style.setProperty("--tier", lv.color);
+    return chip;
+  };
+  const vids = (k) => `${k} ${k === 1 ? "video" : "videos"}`;
   const tile = (value, label, kind) => el("div", { class: `tile${kind ? ` tile--${kind}` : ""}` }, el("strong", {}, value), el("span", {}, label));
 
-  async function modCreators(body) {
+  async function modCreators(root) {
     const d = await api("/api/mod/creators");
     const s = d.summary;
-    const tiles = el("div", { class: "tiles" },
+    const tiles = el("div", { class: "tiles tiles--4" },
       tile(String(s.creators), "creadores activos"),
-      tile(n(s.weekViews), `vistas esta semana (${d.week.label})`),
+      tile(n(s.weekViews), `vistas esta semana · ${d.week.label}`),
       tile(n(s.monthViews), `vistas en ${d.month}`),
       tile(String(s.weekVideos), "videos esta semana"),
       tile(String(s.atRisk), "en riesgo de bajar", s.atRisk ? "warn" : null),
@@ -748,18 +903,29 @@
       tile(d.bot ? "Automático" : "A mano", "roles de Discord", d.bot ? null : "warn"));
     const tiers = el("div", { class: "tiers" }, ...LEVEL_ORDER.map((k) => {
       const lv = levelOf(k);
-      const chip = el("span", { class: "tierchip" }, `${lv.emoji} ${lv.name}: ${s.byTier[k] || 0}`);
+      const chip = el("span", { class: "tierchip" }, el("b", {}, String(s.byTier[k] || 0)), `${lv.emoji} ${lv.name}`);
       chip.style.setProperty("--tier", lv.color);
       return chip;
     }));
-    const plat = d.platforms.length ? el("table", { class: "tbl" }, el("thead", {}, el("tr", {}, el("th", {}, "Red"), el("th", {}, "Videos (mes)"), el("th", {}, "Vistas (mes)"))),
-      el("tbody", {}, ...d.platforms.map((p) => el("tr", {}, el("td", {}, p.platform), el("td", {}, String(p.videos)), el("td", {}, n(p.views)))))) : empty("Aún no hay videos aprobados este mes.");
+    const rules = el("div", { class: "rules" }, "Suben solos con las vistas de la semana:",
+      ...LEVEL_ORDER.slice(1).map((k) => rankChip(k, `${n(levelOf(k).minWeekViews)} → `)));
+    const plat = d.platforms.length ? el("div", { class: "tbl-wrap" }, el("table", { class: "tbl" },
+      el("thead", {}, el("tr", {}, el("th", {}, "Red"), el("th", { class: "num-cell" }, "Videos"), el("th", { class: "num-cell" }, "Vistas"))),
+      el("tbody", {}, ...d.platforms.map((p) => el("tr", {},
+        el("td", {}, el("span", { class: `plat plat--${platType(p.platform)}` }, el("span", { class: "plat__tag", "aria-hidden": "true" }, PLAT_SHORT[platType(p.platform)]), p.platform)),
+        el("td", { class: "num-cell" }, String(p.videos)), el("td", { class: "num-cell" }, n(p.views)))))))
+      : empty("Aún no hay videos aprobados este mes.");
 
-    const filter = el("input", { class: "wide", placeholder: "Buscar por Discord, Roblox o red…", type: "search" });
-    const tierFilter = el("select", {}, el("option", { value: "" }, "Todos los rangos"), ...LEVEL_ORDER.map((k) => el("option", { value: k }, levelName(k))), el("option", { value: "risk" }, "En riesgo"), el("option", { value: "other" }, "Sin aprobar / fuera"));
-    const tableBox = el("div", { class: "scrollx" });
+    const filter = el("input", { class: "wide", placeholder: "🔎 Buscar por Discord, Roblox o red…", type: "search", "aria-label": "Buscar creador" });
+    const tierFilter = el("select", { "aria-label": "Filtrar por rango" }, el("option", { value: "" }, "Todos los rangos"), ...LEVEL_ORDER.map((k) => el("option", { value: k }, levelName(k))), el("option", { value: "risk" }, "⚠️ En riesgo"), el("option", { value: "other" }, "Sin aprobar / fuera"));
+    const tableBox = el("div");
     const detailBox = el("div");
+    const countText = el("p", { class: "muted small" });
     const label = { approved: "Vinculado", pending: "En revisión", rejected: "Rechazado", removed: "Salió del programa", none: "Sin vincular" };
+    const statusOf = (c) => (c.atRisk
+      ? pill(c.warned ? "pending_mod" : "pending", c.idleWeeks >= 1 ? (c.warned ? "Avisado: saldrá" : "2.ª semana sin video") : c.warned ? "Avisado" : "Sin video aún")
+      : c.linkStatus === "approved" && c.tier !== "None" ? pill("approved", "Al día") : pill("rejected", c.tier === "None" ? "Fuera" : label[c.linkStatus] || "—"));
+    const td = (lbl, attrs, ...kids) => el("td", { "data-label": lbl, ...attrs }, ...kids);
     const paint = () => {
       const q = filter.value.trim().toLowerCase();
       const tf = tierFilter.value;
@@ -770,58 +936,83 @@
         if (!q) return true;
         return [c.discord, c.roblox?.name, c.roblox?.displayName, ...c.platforms.map((p) => `${p.type} ${p.url}`)].join(" ").toLowerCase().includes(q);
       });
-      tableBox.replaceChildren(rows.length ? el("table", { class: "tbl tbl--creators" },
-        el("thead", {}, el("tr", {}, ...["Creador", "Roblox", "Rango", "Redes", "Semana", "Sem. pasada", "Mes", "Total", "Último video", "Estado", ""].map((h) => el("th", {}, h)))),
+      countText.textContent = rows.length === d.creators.length ? `${rows.length} creadores` : `${rows.length} de ${d.creators.length} creadores`;
+      tableBox.replaceChildren(rows.length ? el("div", { class: "tbl-wrap" }, el("table", { class: "tbl tbl--creators tbl--cards" },
+        el("thead", {}, el("tr", {}, el("th", {}, "Creador"), el("th", {}, "Rango"), el("th", {}, "Redes"),
+          el("th", { class: "num-cell" }, "Semana"), el("th", { class: "num-cell" }, "Mes"),
+          el("th", {}, "Estado"), el("th", {}, el("span", { class: "sr-only" }, "Acciones")))),
         el("tbody", {}, ...rows.map((c) => {
-          const lv = c.tier && levelOf(c.tier);
           const mismatch = c.tier && c.gameTier && c.gameTier !== c.tier;
+          const { dups, videos } = platIssues(c.platforms);
           return el("tr", { class: c.atRisk ? "is-risk" : null },
-            el("td", {}, c.discord),
-            el("td", {}, c.roblox ? link(`https://www.roblox.com/users/${c.roblox.userId}/profile`, `@${c.roblox.name}`) : "—", c.roblox ? el("div", { class: "small muted" }, `${label[c.linkStatus] || c.linkStatus}${c.level != null ? ` · nivel ${c.level}` : ""}${c.lastSeen ? ` · jugó ${ago(c.lastSeen)}` : ""}`) : null),
-            el("td", {}, lv ? `${lv.emoji} ${lv.name}` : levelName(c.tier), mismatch ? el("div", { class: "small muted" }, `En el juego: ${levelName(c.gameTier)}`) : null,
-              c.next ? el("div", { class: "small muted" }, `Faltan ${n(c.next.missing)} para ${c.next.name}`) : null),
-            el("td", {}, ...(c.platforms.length ? c.platforms.map((p) => el("div", {}, link(p.url, p.type), p.followers ? ` · ${n(p.followers)}` : "")) : ["—"])),
-            el("td", {}, n(c.weekViews), el("div", { class: "small muted" }, `${c.weekVideos} videos`)),
-            el("td", {}, n(c.prevWeekViews)),
-            el("td", {}, n(c.monthViews), el("div", { class: "small muted" }, `${c.monthVideos} videos`)),
-            el("td", {}, n(c.totalViews), el("div", { class: "small muted" }, `${c.totalVideos} videos · ${n(c.robuxPaid)} R$`)),
-            el("td", {}, c.lastVideo || "—"),
-            el("td", {}, c.atRisk ? pill(c.warned ? "pending_mod" : "pending", c.idleWeeks >= 1 ? (c.warned ? "Avisado: saldrá del programa" : "2.ª semana sin video") : c.warned ? "Avisado: sin video" : "Sin video esta semana") : c.linkStatus === "approved" && c.tier !== "None" ? pill("approved", "Al día") : pill("rejected", c.tier === "None" ? "Fuera" : label[c.linkStatus] || "—"),
-              c.pendingEvidences ? el("div", { class: "small muted" }, `${c.pendingEvidences} por revisar`) : null),
-            el("td", {}, btn("Ver", "btn--white", () => showCreator(detailBox, c))));
-        }))) : empty("Nadie coincide con el filtro."));
+            td("Creador", {}, el("div", { class: "who-cell" }, egg(c.discord, true), el("div", {},
+              el("strong", {}, c.discord.replace(/ \(@.*\)$/, "")),
+              c.roblox ? link(`https://www.roblox.com/users/${c.roblox.userId}/profile`, `@${c.roblox.name}`) : el("span", { class: "sub" }, "sin Roblox"),
+              el("span", { class: "sub" }, [label[c.linkStatus] || c.linkStatus, c.level != null ? `nivel ${c.level}` : null, c.lastSeen ? `jugó ${ago(c.lastSeen)}` : null].filter(Boolean).join(" · "))))),
+            td("Rango", {}, c.tier ? rankChip(c.tier) : "—",
+              mismatch ? el("span", { class: "sub" }, `En el juego: ${levelName(c.gameTier)}`) : null,
+              c.next ? el("span", { class: "sub" }, `Faltan ${n(c.next.missing)} para ${c.next.name.replace("Creator ", "")}`) : null),
+            td("Redes", {}, platChips(c.platforms), dups || videos ? el("div", {}, ...issueFlags(c.platforms).filter(Boolean)) : null),
+            td("Semana", { class: "num-cell" }, el("span", { class: "big" }, n(c.weekViews)), el("span", { class: "sub" }, `${vids(c.weekVideos)} · antes ${n(c.prevWeekViews)}`)),
+            td("Mes", { class: "num-cell" }, n(c.monthViews), el("span", { class: "sub" }, vids(c.monthVideos)),
+              el("span", { class: "sub" }, `total ${n(c.totalViews)} · ${n(c.robuxPaid)} R$`)),
+            td("Estado", {}, statusOf(c), el("span", { class: "sub" }, c.lastVideo ? `último video ${new Date(`${c.lastVideo}T12:00:00`).toLocaleDateString("es-CO", { day: "numeric", month: "short" })}` : "sin videos"),
+              c.pendingEvidences ? el("span", { class: "sub" }, `${c.pendingEvidences} por revisar`) : null),
+            el("td", { class: "actions-cell" }, btn("Ver", "btn--yolk", () => showCreator(detailBox, c))));
+        })))) : empty("Nadie coincide con el filtro."));
     };
     filter.addEventListener("input", paint);
     tierFilter.addEventListener("change", paint);
     paint();
-    body.replaceChildren(
-      el("p", { class: "small muted" }, `Los rangos suben solos con las vistas semanales (Activo ${n(3000)}, Viral ${n(3500)}, Estrella ${n(4500)}, Elite ${n(5000)}) bajan a Creator tras una semana sin videos y con 2 semanas seguidas sin videos el creador sale del programa (pierde el rango y el rol de Discord y tiene que volver a aplicar). Fecha límite de los creadores antiguos: ${new Date(s.legacyDeadline).toLocaleDateString("es-CO", { dateStyle: "long" })}.`),
-      tiles, tiers, el("div", { class: "split" }, el("div", {}, weekBars(d.weeks)), el("div", {}, el("h3", {}, "Redes este mes"), plat)),
-      el("h3", { class: "mt" }, "Todos los creadores"), el("div", { class: "form-actions" }, filter, tierFilter), tableBox, detailBox);
+    root.replaceChildren(
+      el("section", { class: "box" },
+        el("div", { class: "box-head" }, el("div", {}, el("h2", {}, "Resumen del programa"), rules)),
+        tiles, tiers,
+        el("p", { class: "hint mt" }, `Una semana sin videos baja a Creator; 2 semanas seguidas lo sacan del programa (pierde el rango y el rol de Discord y vuelve a aplicar). Creadores antiguos: fecha límite ${new Date(s.legacyDeadline).toLocaleDateString("es-CO", { dateStyle: "long" })}.`)),
+      el("div", { class: "split" },
+        el("section", { class: "box" }, el("h2", {}, "📈 Vistas por semana"), weekBars(d.weeks, "Vistas aprobadas de todos los creadores (la amarilla es esta semana)")),
+        el("section", { class: "box" }, el("h2", {}, "📱 Redes este mes"), plat)),
+      el("section", { class: "box" },
+        el("div", { class: "box-head" }, el("div", {}, el("h2", {}, "🎬 Todos los creadores"), countText), el("div", { class: "form-actions box-head__tools" }, filter, tierFilter)),
+        tableBox),
+      detailBox);
   }
 
   async function showCreator(box, c) {
-    box.replaceChildren(el("p", { class: "small muted" }, "Cargando…"));
+    box.replaceChildren(el("div", { class: "skeleton" }));
     const d = await api(`/api/mod/creator?discordId=${encodeURIComponent(c.discordId)}`).catch((e) => { flash(errText(e), "bad"); return null; });
     if (!d) return box.replaceChildren();
-    const select = el("select", {}, ...LEVEL_ORDER.map((k) => el("option", { value: k, selected: k === c.tier }, levelName(k))), el("option", { value: "None", selected: c.tier === "None" }, "Sacar del programa (sin rango)"));
-    const card = el("div", { class: "box detail" },
-      el("div", { class: "item__head" }, el("h3", {}, `${c.discord}${c.roblox ? ` · @${c.roblox.name}` : ""}`), btn("Cerrar", "btn--white", () => box.replaceChildren())),
+    const select = el("select", { "aria-label": "Rango nuevo" }, ...LEVEL_ORDER.map((k) => el("option", { value: k, selected: k === c.tier }, levelName(k))), el("option", { value: "None", selected: c.tier === "None" }, "Sacar del programa (sin rango)"));
+    const editSlot = el("div");
+    const card = el("section", { class: "box detail" },
+      el("div", { class: "box-head" },
+        el("div", { class: "who-cell" }, egg(c.discord), el("div", {}, el("h2", {}, c.discord.replace(/ \(@.*\)$/, "")),
+          el("span", { class: "sub" }, [c.discord.match(/\(@.*\)$/)?.[0]?.slice(1, -1), c.roblox ? `Roblox @${c.roblox.name}` : null].filter(Boolean).join(" · ")))),
+        el("div", { class: "inline" }, c.tier ? rankChip(c.tier) : null, btn("Cerrar", "btn--white", () => box.replaceChildren()))),
       weekBars(d.history, "Sus vistas aprobadas por semana (las barras vacías son semanas sin vistas)"),
-      c.linkStatus === "approved" ? el("div", { class: "item__actions" }, el("span", {}, "Cambiar rango a mano: "), select,
+      el("h3", {}, "Redes"),
+      c.platforms.length ? platList(c.platforms) : empty("No puso redes en su solicitud."),
+      c.application ? el("div", { class: "item__actions" },
+        btn("✏️ Corregir redes", "btn--white", () => {
+          if (!editSlot.firstChild?.isConnected) editSlot.replaceChildren(appEditor({ id: c.application.id, platforms: c.platforms, sample_url: c.application.sampleUrl, email: c.application.email }, refreshMod));
+          editSlot.firstChild.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        })) : null,
+      editSlot,
+      c.linkStatus === "approved" ? el("div", {}, el("h3", {}, "Cambiar rango a mano"), el("div", { class: "form-actions" }, select,
         btn("Guardar", "btn--yolk", (b) => {
           if (select.value === c.tier) return flash("Ya tiene ese rango.", "bad");
           if (select.value === "None" && !confirm("¿Sacarlo del programa? Pierde el rango en el juego y en Discord.")) return;
           act(b, () => api("/api/mod/creator/tier", { discordId: c.discordId, tier: select.value }),
-            (o) => `Rango cambiado. ${o.discord === "ok" ? "Discord actualizado." : o.discord === "error" ? "No se pudo cambiar en Discord: hazlo a mano." : "Cambia el rol de Discord a mano."} El juego lo aplica cuando entre.`, () => modCreators(box.parentElement));
-        })) : null,
+            (o) => `Rango cambiado. ${o.discord === "ok" ? "Discord actualizado." : o.discord === "error" ? "No se pudo cambiar en Discord: hazlo a mano." : "Cambia el rol de Discord a mano."} El juego lo aplica cuando entre.`, refreshMod);
+        }))) : null,
       el("h3", {}, "Avisos al buzón"),
       d.notices.length ? el("ul", { class: "list" }, ...d.notices.map((x) => el("li", { class: "item" },
         el("div", { class: "item__head" }, el("span", { class: "item__title" }, noticeText(x.kind, x.param)), pill(...(DELIVERY[x.delivery] || ["pending", x.delivery || "—"]))),
         el("p", { class: "item__meta" }, `${when(x.createdAt)} · ${x.actor || "Sistema"}${x.deliveredAt ? ` · entregado ${when(x.deliveredAt)}` : ""}`)))) : empty("Sin avisos todavía."),
       el("h3", {}, "Evidencias"),
-      d.evidences.length ? el("table", { class: "tbl" }, el("thead", {}, el("tr", {}, ...["Fecha", "Red", "Video", "Estado", "Vistas"].map((h) => el("th", {}, h)))),
-        el("tbody", {}, ...d.evidences.map((e) => el("tr", {}, el("td", {}, e.publishedOn), el("td", {}, e.platform), el("td", {}, link(e.url, e.title || "abrir")), el("td", {}, { pending: "En revisión", approved: "Aprobada", rejected: "Rechazada" }[e.status] || e.status), el("td", {}, n(e.views))))))
+      d.evidences.length ? el("div", { class: "tbl-wrap" }, el("table", { class: "tbl" }, el("thead", {}, el("tr", {}, el("th", {}, "Fecha"), el("th", {}, "Red"), el("th", {}, "Video"), el("th", {}, "Estado"), el("th", { class: "num-cell" }, "Vistas"))),
+        el("tbody", {}, ...d.evidences.map((e) => el("tr", {}, el("td", { class: "nowrap" }, e.publishedOn), el("td", {}, e.platform), el("td", {}, link(e.url, e.title || "abrir")),
+          el("td", {}, pill(e.status, { pending: "En revisión", approved: "Aprobada", rejected: "Rechazada" }[e.status] || e.status)), el("td", { class: "num-cell" }, n(e.views)))))))
         : empty("No ha subido evidencias."));
     box.replaceChildren(card);
     card.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -830,7 +1021,7 @@
   async function modNotices(body) {
     const { notices } = await api("/api/mod/notices?limit=300");
     body.replaceChildren(el("p", { class: "small muted" }, "Todo lo que el sistema o un moderador le mandó a cada creador por el buzón del juego. “Espera a que entre al juego” = le llega la próxima vez que se conecte."),
-      notices.length ? el("div", { class: "scrollx" }, el("table", { class: "tbl" },
+      notices.length ? el("div", { class: "tbl-wrap" }, el("table", { class: "tbl" },
         el("thead", {}, el("tr", {}, ...["Cuándo", "Jugador", "Aviso", "Quién", "Entrega"].map((h) => el("th", {}, h)))),
         el("tbody", {}, ...notices.map((x) => el("tr", {},
           el("td", {}, when(x.created_at)),
@@ -846,7 +1037,7 @@
     const STATUS = { notified: ["pending", "Avisado"], applied: ["contacted", "Aplicó"], approved: ["approved", "Aprobado"], removed: ["rejected", "Rango quitado"] };
     body.replaceChildren(
       el("div", { class: "notice" }, `Jugadores que ya tenían el rango de creador en el juego sin pasar por esta página. Al entrar al juego reciben un aviso y tienen ${days} días para aplicar; si no, pierden el rango. Fecha límite para todos: ${new Date(deadline).toLocaleDateString("es-CO", { dateStyle: "long" })}. Quien aplicó a tiempo conserva el rango mientras revisan su solicitud (apruébala o recházala en “Solicitudes”).`),
-      legacy.length ? el("div", { class: "scrollx" }, el("table", { class: "tbl" },
+      legacy.length ? el("div", { class: "tbl-wrap" }, el("table", { class: "tbl" },
         el("thead", {}, el("tr", {}, ...["Jugador", "Nivel que tenía", "Estado", "Avisado", "Plazo", "Solicitud", "Última vez"].map((h) => el("th", {}, h)))),
         el("tbody", {}, ...legacy.map((l) => el("tr", {},
           el("td", {}, link(`https://www.roblox.com/users/${l.roblox_user_id}/profile`, `@${l.name}`)),
@@ -860,7 +1051,7 @@
   }
 
   const ACTION_TEXT = {
-    "application.approve": "aprobó la solicitud de", "application.reject": "rechazó la solicitud de", "application.contacted": "contactó a",
+    "application.approve": "aprobó la solicitud de", "application.reject": "rechazó la solicitud de", "application.contacted": "contactó a", "application.edit": "corrigió los datos de la solicitud de",
     "link.approve": "aprobó la vinculación de", "link.reject": "rechazó la vinculación de",
     "evidence.approve": "aprobó una evidencia de", "evidence.probe": "volvió a leer las vistas de una evidencia", "evidence.reject": "rechazó una evidencia de", "evidence.update": "actualizó las vistas de",
     "bonus.approve": "aprobó un bono de", "bonus.reject": "rechazó un bono de", "bonus.paid": "pagó el bono de",
@@ -872,12 +1063,13 @@
   };
   async function modAudit(body) {
     const { audit } = await api("/api/mod/audit?limit=200");
-    body.replaceChildren(audit.length ? el("div", { class: "scrollx" }, el("table", { class: "tbl" },
+    body.replaceChildren(audit.length ? el("div", { class: "tbl-wrap" }, el("table", { class: "tbl" },
       el("thead", {}, el("tr", {}, el("th", {}, "Cuándo"), el("th", {}, "Quién"), el("th", {}, "Qué"), el("th", {}, "Detalles"))),
       el("tbody", {}, ...audit.map((a) => el("tr", {},
-        el("td", {}, when(a.ts)), el("td", {}, `${a.actor_name} (${a.actor_role})`),
+        el("td", { class: "nowrap" }, when(a.ts)),
+        el("td", {}, el("strong", { class: "nowrap" }, a.actor_name.replace(/ \(@.*\)$/, "")), el("span", { class: "sub" }, [a.actor_name.match(/\(@.*\)$/)?.[0]?.slice(1, -1), a.actor_role].filter(Boolean).join(" · "))),
         el("td", {}, `${ACTION_TEXT[a.action] || a.action} ${a.target || ""}`),
-        el("td", { class: "small" }, a.details ? Object.entries(a.details).filter(([, v]) => v != null && v !== "").map(([k, v]) => `${k}: ${v}`).join(" · ") : ""))))))
+        el("td", { class: "small details-cell" }, a.details ? Object.entries(a.details).filter(([, v]) => v != null && v !== "").map(([k, v]) => `${k}: ${v}`).join(" · ") : ""))))))
       : empty("El registro está vacío."));
   }
 
@@ -1142,7 +1334,7 @@
           act(b, () => api("/api/mod/staff/rank", { discordId: m.discordId, rank: sel.value }), (o) => `Rango cambiado. ${o.discord === "ok" ? "Discord actualizado." : o.discord === "error" ? "No se pudo cambiar en Discord: revisa «Bot de Discord»." : "Cámbialo a mano en Discord."}`, refreshMod);
         })) : ""));
     });
-    const table = rows.length ? el("div", { class: "scrollx" }, el("table", { class: "tbl" },
+    const table = rows.length ? el("div", { class: "tbl-wrap" }, el("table", { class: "tbl" },
       el("thead", {}, el("tr", {}, ...["Miembro", "Rango", "Última vez", "Horas hoy", "Semana", "Tareas del mes", "Actividad", "Meses sin cumplir", ""].map((h) => el("th", {}, h)))), el("tbody", {}, ...rows))) : empty("Todavía no hay staff vinculado.");
     body.replaceChildren(el("p", { class: "small muted" }, `Tareas de ${d.month}. Fecha límite del staff antiguo: ${new Date(s.linkDeadline).toLocaleDateString("es-CO", { dateStyle: "long" })}. Roles de Discord: ${d.bot ? "automáticos" : "a mano (falta el bot)"}.`),
       tiles, ranks, coverageChart(d.coverage), el("h3", { class: "mt" }, "Equipo"), table);
@@ -1419,7 +1611,7 @@
     const announceBox = el("div", { class: "form" },
       el("label", { class: "check" }, anOn, `Mandar avisos al canal de anuncios del staff (#${d.announceChannel})`),
       el("label", {}, "Minutos entre menciones del mismo aviso (en medio sale sin mención)", numIn(() => st.announce.mentionEveryMinutes, (v) => { st.announce.mentionEveryMinutes = v; }, { max: 1440 })),
-      el("div", { class: "scrollx" }, el("table", { class: "tbl tbl--grid" }, el("thead", {}, el("tr", {}, el("th", {}, "Aviso"), el("th", {}, "Mencionar a"))), el("tbody", {}, ...evRows))),
+      el("div", { class: "tbl-wrap" }, el("table", { class: "tbl tbl--grid" }, el("thead", {}, el("tr", {}, el("th", {}, "Aviso"), el("th", {}, "Mencionar a"))), el("tbody", {}, ...evRows))),
       el("p", { class: "small muted" }, "El bot necesita «Enviar mensajes» y «Mencionar @everyone, @here y todos los roles» en ese canal (o que los roles se puedan mencionar). Las bajadas de rango nunca se anuncian."));
     const save = !ro ? el("div", { class: "form-actions sticky-actions" },
       btn("Guardar ajustes", "btn--yolk", (b) => act(b, () => api("/api/mod/staff/settings", { settings: st }), "Ajustes guardados. Se aplican desde ya a las tareas y cuotas.", async () => { staffProgram = await api("/api/staff/program"); show("admin-staff-ajustes"); })),
@@ -1472,6 +1664,13 @@
     show((location.hash || "#inicio").slice(1));
   }
 
+  // Tema claro / oscuro (botón arriba a la derecha). La elección se guarda en este navegador.
+  const themeLabel = () => { const dark = document.documentElement.dataset.theme === "dark"; $("theme-btn").setAttribute("aria-label", dark ? "Cambiar a tema claro" : "Cambiar a tema oscuro"); $("theme-btn").setAttribute("aria-pressed", String(dark)); };
+  $("theme-btn").addEventListener("click", () => { window.seTheme?.toggle(); themeLabel(); });
+  document.addEventListener("se-theme", themeLabel);
+  themeLabel();
+  // La foto de Discord no siempre carga (CSP o enlace viejo): usa el huevo de Sky Eggs.
+  $("who-pic").addEventListener("error", (e) => { if (!e.currentTarget.src.endsWith("/img/icon-192.png")) e.currentTarget.src = "/img/icon-192.png"; });
   $("burger").addEventListener("click", () => document.body.classList.toggle("nav-open"));
   $("scrim").addEventListener("click", () => document.body.classList.remove("nav-open"));
   $("logout").addEventListener("click", async () => {

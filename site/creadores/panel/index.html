@@ -6,6 +6,7 @@
   <meta name="robots" content="noindex, nofollow">
   <title>Panel · Sky Eggs</title>
   <link rel="icon" href="/favicon.ico" sizes="any">
+  <script src="/js/theme.js?v=__ASSET_V__"></script>
   <link rel="stylesheet" href="/creadores/panel/panel.css?v=__ASSET_V__">
 </head>
 <body class="pn">
@@ -28,6 +29,10 @@
       <header class="pn-top">
         <button class="pn-burger" type="button" id="burger" aria-label="Abrir menú" aria-controls="side">☰</button>
         <h1 class="pn-title" id="page-title">Panel</h1>
+        <button class="theme-btn" type="button" id="theme-btn" aria-label="Cambiar a tema oscuro" title="Tema claro / oscuro">
+          <svg class="theme-btn__light" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="12" cy="12" r="4.6" fill="currentColor"/><g stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 2.2v2.4M12 19.4v2.4M2.2 12h2.4M19.4 12h2.4M5.1 5.1l1.7 1.7M17.2 17.2l1.7 1.7M5.1 18.9l1.7-1.7M17.2 6.8l1.7-1.7"/></g></svg>
+          <svg class="theme-btn__dark" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M20.3 14.6A8.6 8.6 0 0 1 9.4 3.7a8.6 8.6 0 1 0 10.9 10.9z" fill="currentColor"/><circle cx="17.5" cy="5.5" r="1.2" fill="currentColor"/><circle cx="21" cy="9" r=".8" fill="currentColor"/></svg>
+        </button>
         <div class="who" id="who" hidden>
           <img id="who-pic" src="/img/icon-192.png" alt="">
           <span class="who__name" id="who-name"></span>
@@ -78,6 +83,7 @@
           <ol>
             <li><strong>Entra con Discord.</strong> Con el rol de moderador aparece la pestaña “Moderación”; el número rojo es lo que falta por revisar.</li>
             <li><strong>Solicitudes:</strong> abre sus redes, escríbele por Discord (su usuario sale en la tarjeta) y marca “Contactado”. Después “Aprobar” o “Rechazar”, siempre con una nota.</li>
+            <li><strong>¿Redes repetidas o un video en vez del canal?</strong> La tarjeta lo marca. Toca “✏️ Corregir datos”, quita las repetidas, pon el enlace del canal (ej. <code>youtube.com/@usuario</code>) y guarda. Para un creador ya aprobado: “Creadores y métricas” → “Ver” → “✏️ Corregir redes”. Queda en el Registro.</li>
             <li><strong>Al aprobar</strong> también confirmas su cuenta de Roblox: revisa en la tarjeta que sea la suya (enlace al perfil, desde cuándo juega y su nivel) y pregúntale por Discord si tienes dudas. El rol <em>Content Creator</em> de Discord, el nivel Creator del juego y el correo de bienvenida llegan solos (si la página dice que no pudo poner el rol, dáselo a mano). Pásale esta guía y dile que salga y vuelva a entrar al panel.</li>
             <li><strong>Vinculaciones:</strong> salen cuando un creador cambia de cuenta. Confirma con él que es la suya y “Aprobar”.</li>
             <li><strong>Evidencias:</strong> abre el enlace y comprueba que sea de Sky Eggs, de ese creador (mira el canal que leyó la página) y con la fecha correcta. Si la página leyó las vistas, usa “Aprobar con vistas automáticas”: se actualizan solas. Si no pudo (Instagram, Facebook o la red bloqueó la lectura), escribe las vistas y “Aprobar con vistas fijas”. Si no cumple, “Rechazar” con el motivo.</li>
