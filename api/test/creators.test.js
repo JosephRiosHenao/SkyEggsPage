@@ -652,3 +652,19 @@ test("moderador corrige redes repetidas y un video en vez del canal (queda en el
   assert.match(log.details.redes, /shorts\/abc123.*→.*@rbxkits/);
   assert.throws(() => C.editApplication(db, actor("mod"), { id, platforms: after.platforms, sampleUrl: "javascript:alert(1)" }), /bad_url/);
 });
+
+test("HTTP: sin estar en el servidor de Discord no puede usar el panel", async () => {
+  const fake = fakeDiscord({ fan: [] }); // "fuera" no está en el servidor (Discord responde 404)
+  await withServer(async (base) => {
+    const out = await login(base, "fuera");
+    const me = await (await fetch(`${base}/api/me`, { headers: { cookie: out } })).json();
+    assert.equal(me.user.roles.inGuild, false);
+    const apply = await fetch(`${base}/api/creators/apply`, json({ age13: true, robloxUserId: 1, platforms: [], about: "x" }, out));
+    assert.equal(apply.status, 403);
+    assert.equal((await apply.json()).error, "join_guild");
+    assert.equal((await (await fetch(`${base}/api/mod/queue`, { headers: { cookie: out } })).json()).error, "join_guild");
+    // Ya en el servidor (sin rol): pasa el filtro y le toca la regla normal.
+    const fan = await login(base, "fan");
+    assert.equal((await (await fetch(`${base}/api/creators/me`, { headers: { cookie: fan } })).json()).error, "creator_only");
+  }, fake);
+});

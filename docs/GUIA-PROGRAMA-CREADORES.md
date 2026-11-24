@@ -2,7 +2,7 @@
 
 Página pública: https://skyeggs.pro/creadores/ · Panel: https://skyeggs.pro/creadores/panel/
 
-Se entra con Discord. El panel muestra las pestañas según el rol que tengas en el servidor de Discord de Sky Eggs:
+Se entra con Discord y **hay que estar en el servidor de Discord de Sky Eggs**: si no, el panel solo muestra "Únete al Discord" (botón para unirse y "Ya me uní" para comprobar) y la API responde `join_guild`. El panel muestra las pestañas según el rol que tengas en ese servidor:
 
 | Actor | Rol de Discord | Qué ve |
 |---|---|---|

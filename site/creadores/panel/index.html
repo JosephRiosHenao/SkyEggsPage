@@ -53,6 +53,22 @@
           <p class="small muted mt">Solo leemos tu nombre, tu foto y tus roles en nuestro servidor.</p>
         </section>
 
+        <!-- Con sesión, pero fuera del servidor de Discord: sin eso no sabemos su rol -->
+        <section class="box login-card join-card" id="view-join" hidden>
+          <img src="/img/discord.webp" width="96" height="96" alt="">
+          <h2>Únete al Discord de Sky Eggs</h2>
+          <p class="muted">Hola <strong id="join-name"></strong>. Para usar el panel tienes que estar en nuestro servidor de Discord: ahí vemos si eres aspirante, creador, staff o admin.</p>
+          <ol class="join-steps">
+            <li>Entra al servidor con el botón morado.</li>
+            <li>Vuelve aquí y toca <strong>“Ya me uní”</strong>.</li>
+          </ol>
+          <div class="join-actions">
+            <a class="btn btn--discord btn--lg" href="https://discord.gg/sTgtR7KdGQ" target="_blank" rel="noopener">Unirme al servidor</a>
+            <a class="btn btn--yolk btn--lg" id="join-check" href="/api/auth/discord/login?next=/creadores/panel/">Ya me uní</a>
+          </div>
+          <p class="small muted">¿Es otra cuenta de Discord? <button class="linkbtn" type="button" id="join-logout">Salir y entrar con otra</button></p>
+        </section>
+
         <!-- Con sesión -->
         <div id="view-app" hidden>
           <div id="view"></div>
