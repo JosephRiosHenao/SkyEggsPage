@@ -442,9 +442,12 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
     "POST /api/mod/assets/sync": async (req) => {
       checkOrigin(req); const a = requireAdmin(req);
       const b = await readJson(req, 256);
+      // Sin catálogo no hay nada que bajar: llega cuando arranca un servidor del juego (versión publicada).
+      const { total } = assetStatus(db);
+      if (!total) return { ok: true, started: false, total: 0 };
       syncAssets(db, cfg, fetchImpl, log, { force: b.force === true }).catch(() => {});
       C.audit(db, a, "assets.sync", null, { force: b.force === true });
-      return { ok: true, started: true };
+      return { ok: true, started: true, total };
     },
     // Botones de Discord (Interactions Endpoint URL). Discord firma cada petición.
     "POST /api/discord/interactions": async (req) => {
