@@ -9,7 +9,8 @@ Landing estática del juego de Roblox **Sky Eggs (Huevos del cielo)**. Público:
   - `img/`: imágenes en WebP; `fonts/`: Lilita One y Baloo 2 auto-alojadas.
   - `__SITE_URL__` en HTML, `robots.txt` y `sitemap.xml` se reemplaza al construir la imagen (build arg `SITE_URL`).
 - `site/creadores/`: página pública del Programa de Creadores (`index.html`) y panel con login de Discord (`panel/`). Estilos en `creadores.css`. Sin `style=` en línea (la CSP lo bloquea): usar clases o `el.style` desde JS.
-- `site/admin/`: panel de métricas con login (datos de `/api/admin/*`). `noindex`.
+- `site/admin/`: panel de métricas con login (datos de `/api/admin/*`). `noindex`. También se incrusta en el panel (`?embed=1`).
+- `site/staff/`: página pública del programa de staff (generada).
 - `api/`: API de "Prueba tu suerte" (Node 22 sin dependencias + `node:sqlite`). Sorteo en el servidor, búsqueda de cuenta por usuario o nombre visible, modo buzón y modo código, endpoints del juego (`/api/game/pull|ack|redeem` con `X-Game-Key`) y panel. Pruebas: `cd api && npm test`. Ver `DEPLOY.md` §6.
 - `Dockerfile` + `docker/`: nginx con caché, gzip y cabeceras de seguridad. `/healthz` responde `ok`.
 - `docker-compose.yml`: servicio `skyeggs-web` con labels de Traefik (dominio desde `.env`).
@@ -42,6 +43,14 @@ No tocar otros contenedores ni la configuración de un Traefik existente sin con
 - Los packs de `program.js` tienen que coincidir con `CreatorServiceConfig.Packs` del juego. El texto de la página pública (`site/creadores/index.html`) también los repite: actualizar los tres a la vez.
 - Rangos automáticos, avisos al buzón y creadores antiguos: `api/src/lifecycle.js` (el texto de los avisos vive en el juego, `WebRewardServiceConfig.CreatorNotices`). Lista pública y panel de métricas del staff: `api/src/insights.js`; carrusel en `site/js/creators.js` (portada y /creadores/). Roles de Discord con bot opcional (`DISCORD_BOT_TOKEN`, `discord.js`).
 - Guía para cada actor: pestaña "Guía" del panel y `docs/GUIA-PROGRAMA-CREADORES.md`.
+
+## Programa de staff
+
+- Rangos Helper → ModeratorJr → Moderator (roles de Discord en `config.discord.staffRoles`). Reglas en `api/src/staff.js`; rangos, comandos, tareas y preguntas del formulario en `api/src/staffProgram.js` (fuente única para la API, el panel y `/staff/`).
+- `site/staff/index.html` se genera con `node scripts/build-staff-page.mjs`: no editarla a mano.
+- Ajustes que cambia el Admin (metas, cuota semanal juego + Discord, ascensos, excusas): `api/src/staffSettings.js` (tabla `settings`). Actividad en Discord por REST: `api/src/discordActivity.js`. Inicio por rol: `api/src/home.js`.
+- Juego: kind `staffset` en `WebRewardService`, `StaffActivity` (cuenta comandos y `;Duty`) y `Config.Commands.StaffTools` (`;Report`, `;sc`, `;Duty`, `;PlayerInfo`, `;StaffHelp`). Los comandos de cada rango viven en `Config.Roles` de HD Admin; si cambian, actualizar `staffProgram.js` y regenerar la página.
+- Panel: barra lateral en `site/creadores/panel/` (`navGroups()` en `panel.js`); "Prueba tu suerte" se incrusta desde `/admin/?embed=1`.
 
 ## Conexión con el juego
 

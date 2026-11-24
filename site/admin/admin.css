@@ -116,3 +116,8 @@ select, input { min-height: 38px; padding: 0 .6rem; border-radius: 9px; border: 
 .err { color: var(--danger); font-weight: 600; }
 
 .btnlink { display: inline-flex; align-items: center; min-height: 38px; padding: 0 1rem; border-radius: 9px; border: 1px solid var(--border); color: var(--text-primary); text-decoration: none; font-weight: 600; }
+
+/* Modo incrustado en el panel (barra lateral del panel principal) */
+.is-embed body, .is-embed .viz-root { min-height: 0; }
+.is-embed .dash { max-width: none; padding: 1rem 1.2rem 1.5rem; }
+.is-embed .dash__top h1, .is-embed #logout, .is-embed .dash__controls a { display: none; }

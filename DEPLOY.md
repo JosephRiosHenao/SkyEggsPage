@@ -198,7 +198,19 @@ Sin librerías: la API usa la REST de Discord (`PUT/DELETE /guilds/{servidor}/me
 4. Hoy hay un solo rol (Content Creator `1561051688125730897`) para todos los niveles: no hace falta nada más. Solo si algún día creas un rol por nivel, copia sus IDs.
 5. En `.env`: `DISCORD_BOT_TOKEN=…` y, si los creaste, `DISCORD_ROLE_CREATOR_ACTIVE/VIRAL/STAR/ELITE`. `docker compose up -d skyeggs-api`.
 
-Prueba: en Moderación → "Creadores y métricas" la tarjeta "roles de Discord" dice **Automático**. Cada cambio queda en el Registro ("actualizó los roles de Discord de…" o el error).
+6. Para el staff, en la pestaña **Bot** activa **Server Members Intent** (la página lee cada 30 min quién tiene los roles Helper / Moderator Jr / Moderator para detectar al staff antiguo).
+
+Prueba: panel → Administración → **Bot de Discord** → "Comprobar" (opcional: el ID de Discord de un usuario). Revisa token, servidor, permiso **Gestionar roles**, que cada rol exista y que el rol del bot esté por encima. Cada cambio queda en el Registro ("actualizó los roles de Discord de…" o el error, ya explicado).
+
+Errores típicos al poner un rol:
+
+| Respuesta | Qué significa | Arreglo |
+|---|---|---|
+| `404` código 10004 | El bot no está en el servidor (o `DISCORD_GUILD_ID` está mal) | Invitar el bot con la URL del paso 2 |
+| `404` código 10007 | Ese usuario ya no está en el servidor | Nada: vuelve a ponerse cuando entre y lo cambies |
+| `404` código 10011 | El ID del rol no existe | Corregir el ID en `.env` |
+| `403` código 50013 | Falta «Gestionar roles» o el rol del bot está debajo | Paso 2 y 3 |
+| `401` | Token inválido | Reset Token y actualizar `.env` |
 
 ### Cómo funciona
 
@@ -213,6 +225,37 @@ Prueba: en Moderación → "Creadores y métricas" la tarjeta "roles de Discord"
 - Las capturas se guardan en el volumen (`/data/uploads`) y solo las ven su dueño y el staff.
 - Packs y niveles: `api/src/program.js`. Deben coincidir con `CreatorServiceConfig.Packs` del juego.
 - **Vistas automáticas** (`api/src/views.js`): la imagen trae **yt-dlp** (en `/opt/ytdlp`, se actualiza solo cada día). Lee YouTube, TikTok, Twitch y Kick sin claves y refresca cada `VIEWS_REFRESH_HOURS` (6) mientras el video cuente para un reclamo. Solo se consultan esos dominios por https (sin extractor genérico). Si YouTube bloquea la IP del VPS, `YOUTUBE_API_KEY` (gratis) sirve de respaldo. `VIEWS_AUTO=false` lo apaga. Para ver qué pasa: `docker logs skyeggs-api | grep views`.
+
+## 8. Programa de staff (Helper, Moderator Jr, Moderator)
+
+Página pública: `/staff/` (generada con `node scripts/build-staff-page.mjs` desde `api/src/staffProgram.js`; vuelve a generarla si cambias rangos, comandos o tareas). Panel: `/creadores/panel/` con barra lateral.
+
+- **Entrar**: el aspirante entra con Discord, elige su cuenta de Roblox (tiene que haber jugado) y responde el formulario de Helper. Un **Moderator** (o el Admin) lo aprueba: el juego recibe `staffset` (etiqueta HELPER + rol de HD Admin) y un correo; con el bot, el rol de Discord.
+- **Ascensos**: Helper → Moderator Jr lo aprueba un Moderator o el Admin; Moderator Jr → Moderator **solo el Admin**. Todo pasa por `audit()`.
+- **Staff antiguo**: no llena formulario; vincula su Roblox antes de `STAFF_LINK_DEADLINE` (1/12/2026). Si el juego ya lo vio con su etiqueta, se confirma solo; si no, lo confirma un Moderator. Después de la fecha: al entrar al juego pierde la etiqueta y, con el bot + Server Members Intent, el rol de Discord.
+- **Tareas mensuales** (tabla en `/staff/`):
+  - se miden solas: semanas con la cuota cumplida, horas con `;Duty`, días activos, acciones de moderación y revisiones en el panel;
+  - con evidencias que aprueba un rango superior: ayudas, invitaciones y eventos.
+- **Ajustes del staff** (panel → Administración → Ajustes del staff, solo el Admin; se guardan en la base de datos y quedan en el Registro):
+  - metas por rango;
+  - cuota semanal;
+  - actividad en Discord;
+  - requisitos de ascenso;
+  - faltas, avisos y excusas.
+  - Las variables `STAFF_*` son solo los valores iniciales.
+- **Cuota semanal**: juego + crédito de Discord ≥ horas del rango, y el juego ≥ el mínimo del rango.
+- **Actividad en Discord**:
+  1. El Admin elige los canales (IDs).
+  2. Cada 5 min el bot lee quién escribió y cuándo (`GET /channels/{id}/messages?after=`). Nunca lee el texto, así que no hace falta Message Content Intent.
+  3. Necesita **Ver canal** y **Leer el historial de mensajes** en esos canales.
+  4. Cada ventana de 5 min con un mensaje suma 5 min, con un tope diario.
+- **Excusas**: el miembro excusa una semana o un mes (actual o anterior) y la revisa un rango superior.
+  - Si la aprueban: la semana cuenta como cumplida, o el mes no suma falta.
+  - Al llegar al tope de faltas, sale después de `excuseDays` (5) si no tiene una excusa aprobada o en revisión. Le llega el aviso `staff_removal_warning` al buzón.
+- **Ascenso**: el propio miembro solo lo pide si cumple los requisitos (días en el rango, % del mes, meses cumplidos seguidos). Un rango superior puede proponerlo igual.
+- **Inicio del panel**: pendientes por prioridad (urgente / importante / cuando puedas) y accesos rápidos según el rol (`GET /api/home`).
+- **Reportes**: cualquier jugador usa `;Report <jugador> <motivo>` en el juego → `/api/game/staff/report` → panel "Reportes del juego".
+- **Métricas**: "Equipo y métricas" muestra quién está conectado, última vez, horas, progreso y la cobertura por hora (jugadores vs minutos de staff).
 
 ## Problemas comunes
 

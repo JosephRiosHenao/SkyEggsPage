@@ -52,6 +52,12 @@ export const config = {
       moderator: process.env.DISCORD_ROLE_MODERATOR || "1563742282392543312",
       creator: process.env.DISCORD_ROLE_CREATOR || "1561051688125730897",
     },
+    // Programa de staff (2026-11-23): roles de Discord de cada rango.
+    staffRoles: {
+      Helper: process.env.DISCORD_ROLE_HELPER || "1563735797444771961",
+      ModeratorJr: process.env.DISCORD_ROLE_MODERATORJR || "1563736116300087337",
+      Moderator: process.env.DISCORD_ROLE_STAFF_MODERATOR || "1563736465522036736",
+    },
   },
   // Lectura automática de vistas (yt-dlp). Respaldo opcional para YouTube: YOUTUBE_API_KEY.
   views: {
@@ -77,6 +83,17 @@ export const config = {
     // desde el aviso, y fecha límite final (hora de Colombia) tras la cual se les quita el rol.
     legacyNoticeDays: int("LEGACY_NOTICE_DAYS", 3),
     legacyDeadline: Date.parse(`${process.env.LEGACY_DEADLINE || "2027-01-01"}T00:00:00-05:00`),
+  },
+  // Programa de staff: Helper → Moderator Jr → Moderator.
+  staff: {
+    // El staff que ya existía tiene hasta esta fecha (hora de Colombia) para vincular Discord + Roblox.
+    linkDeadline: Date.parse(`${process.env.STAFF_LINK_DEADLINE || "2026-12-01"}T00:00:00-05:00`),
+    // Tareas mensuales: meses seguidos sin cumplir antes de salir del staff (0 = nunca automático).
+    failMonthsToRemove: int("STAFF_FAIL_MONTHS_TO_REMOVE", 2),
+    // Día del mes en que llega el aviso si van por debajo de la mitad.
+    warnDay: int("STAFF_WARN_DAY", 20),
+    // Días después de fin de mes para revisar evidencias antes de cerrar el mes.
+    graceDays: int("STAFF_GRACE_DAYS", 3),
   },
 };
 if (!config.discord.redirectUri) config.discord.redirectUri = `${config.siteUrl}/api/auth/discord/callback`;

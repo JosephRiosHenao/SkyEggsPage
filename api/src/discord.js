@@ -57,11 +57,14 @@ export function rolesFrom(cfg, member) {
   const ids = new Set(Array.isArray(member?.roles) ? member.roles : []);
   const r = cfg.discord.roles;
   const admin = ids.has(r.admin);
+  const st = cfg.discord.staffRoles || {};
   return {
     inGuild: Boolean(member),
     admin,
     moderator: admin || ids.has(r.moderator),
     creator: ids.has(r.creator),
+    // Rango de staff según Discord (el que manda es el de la página una vez vinculado).
+    staffDiscord: ids.has(st.Moderator) ? "Moderator" : ids.has(st.ModeratorJr) ? "ModeratorJr" : ids.has(st.Helper) ? "Helper" : null,
   };
 }
 
@@ -92,6 +95,18 @@ export function botEnabled(cfg) {
 }
 
 // Roles de Discord que corresponden a un rango (null = sin rango: se quitan todos).
+// Roles de Discord de un rango de staff (pone el suyo y quita los otros dos).
+export function rolesForStaff(cfg, rank) {
+  const all = cfg.discord.staffRoles || {};
+  const add = [];
+  const remove = [];
+  for (const [key, role] of Object.entries(all)) {
+    if (!role) continue;
+    if (key === rank) add.push(role); else remove.push(role);
+  }
+  return { add, remove };
+}
+
 export function rolesForTier(cfg, tierKey) {
   const base = cfg.discord.roles.creator;
   const levels = cfg.discord.levelRoles || {};
@@ -103,6 +118,23 @@ export function rolesForTier(cfg, tierKey) {
     if (key === tierKey) add.push(role); else remove.push(role);
   }
   return { add, remove };
+}
+
+// Códigos de error de Discord → explicación en español (para el Registro y el diagnóstico).
+const DISCORD_CODES = {
+  0: "token del bot inválido (401): copia de nuevo el token en DISCORD_BOT_TOKEN",
+  10004: "el bot NO está en el servidor (Unknown Guild): invítalo con la URL de OAuth2 → bot + Manage Roles, o revisa DISCORD_GUILD_ID",
+  10007: "ese usuario ya no está en el servidor de Discord (Unknown Member)",
+  10011: "ese rol no existe en el servidor (Unknown Role): revisa el ID del rol",
+  10013: "usuario desconocido",
+  50001: "el bot no tiene acceso (Missing Access)",
+  50013: "faltan permisos: el bot necesita Manage Roles y su rol debe estar POR ENCIMA del rol que pone (Missing Permissions)",
+};
+export function explainDiscordError(status, body) {
+  const code = body?.code;
+  if (status === 401) return DISCORD_CODES[0];
+  if (code != null && DISCORD_CODES[code]) return `${DISCORD_CODES[code]} [${status}/${code}]`;
+  return `${status}${code != null ? `/${code}` : ""}${body?.message ? ` ${String(body.message).slice(0, 80)}` : ""}`;
 }
 
 // Aplica los cambios. Devuelve { ok, done: [...], errors: [...] }. Nunca lanza.
@@ -126,7 +158,9 @@ export async function setMemberRoles(cfg, discordId, { add = [], remove = [] }, 
           await new Promise((res) => setTimeout(res, Math.min(5000, Math.ceil((r.body?.retry_after || 1) * 1000))));
           continue;
         }
-        errors.push(`${method} ${role}: ${r.status}`);
+        // Quitar un rol a quien ya salió del servidor no es un error real.
+        if (method === "DELETE" && r.body?.code === 10007) { done.push(`-${role} (no está en el servidor)`); return; }
+        errors.push(`${method} ${role}: ${explainDiscordError(r.status, r.body)}`);
         return;
       } catch (e) { errors.push(`${method} ${role}: ${e.message}`); return; }
     }
@@ -134,4 +168,62 @@ export async function setMemberRoles(cfg, discordId, { add = [], remove = [] }, 
   for (const role of add) await run("PUT", role);
   for (const role of remove) await run("DELETE", role);
   return { ok: errors.length === 0, done, errors };
+}
+
+// ---------- Diagnóstico del bot ----------
+// Revisa paso a paso lo que hace falta para poner roles y dice qué está mal.
+// roles = { nombre: id }. userId (opcional) = comprobar además a ese usuario.
+const MANAGE_ROLES = 1n << 28n;
+const ADMINISTRATOR = 1n << 3n;
+export async function diagnoseBot(cfg, roles, userId = null, fetchImpl = fetch) {
+  const checks = [];
+  const add = (ok, label, detail = "") => { checks.push({ ok, label, detail }); return ok; };
+  if (!add(Boolean(cfg.discord.botToken), "Token del bot (DISCORD_BOT_TOKEN)", cfg.discord.botToken ? "puesto" : "vacío: Discord Developer Portal → tu app → Bot → Reset Token")) return { ok: false, checks };
+  if (!add(Boolean(cfg.discord.guildId), "ID del servidor (DISCORD_GUILD_ID)", cfg.discord.guildId || "vacío")) return { ok: false, checks };
+  const auth = { authorization: `Bot ${cfg.discord.botToken}` };
+  const get = (path) => call(fetchImpl, `${API}${path}`, { headers: auth }).catch((e) => ({ ok: false, status: 0, body: { message: e.message } }));
+  const me = await get("/users/@me");
+  if (!add(me.ok, "El token es válido", me.ok ? `bot @${me.body.username} (${me.body.id})` : explainDiscordError(me.status, me.body))) return { ok: false, checks };
+  const guild = await get(`/guilds/${cfg.discord.guildId}`);
+  if (!add(guild.ok, "El bot está dentro del servidor", guild.ok ? guild.body.name : explainDiscordError(guild.status, guild.body))) return { ok: false, checks };
+  const [rolesRes, member] = await Promise.all([get(`/guilds/${cfg.discord.guildId}/roles`), get(`/guilds/${cfg.discord.guildId}/members/${me.body.id}`)]);
+  if (!add(rolesRes.ok && member.ok, "Leer roles del servidor", rolesRes.ok && member.ok ? "" : explainDiscordError(rolesRes.status || member.status, rolesRes.body || member.body))) return { ok: false, checks };
+  const byId = new Map(rolesRes.body.map((r) => [r.id, r]));
+  const mine = (member.body.roles || []).map((id) => byId.get(id)).filter(Boolean);
+  const everyone = byId.get(cfg.discord.guildId);
+  const perms = [everyone, ...mine].reduce((acc, r) => acc | BigInt(r?.permissions || 0), 0n);
+  const top = Math.max(0, ...mine.map((r) => r.position));
+  const topName = mine.find((r) => r.position === top)?.name || "(sin rol)";
+  add(Boolean(perms & (MANAGE_ROLES | ADMINISTRATOR)), "Permiso Manage Roles", perms & ADMINISTRATOR ? "tiene Administrador" : perms & MANAGE_ROLES ? "sí" : "NO: dale al rol del bot el permiso «Gestionar roles»");
+  for (const [name, id] of Object.entries(roles)) {
+    if (!id) continue;
+    const r = byId.get(String(id));
+    if (!add(Boolean(r), `Rol ${name} existe`, r ? `${r.name} (${id})` : `no existe ningún rol con ID ${id} en este servidor`)) continue;
+    add(top > r.position, `El rol del bot está por encima de ${name}`, top > r.position ? `${topName} (pos. ${top}) > ${r.name} (pos. ${r.position})` : `NO: arrastra «${topName}» por encima de «${r.name}» en Ajustes del servidor → Roles`);
+  }
+  if (userId) {
+    const u = await get(`/guilds/${cfg.discord.guildId}/members/${userId}`);
+    add(u.ok, `El usuario ${userId} está en el servidor`, u.ok ? `@${u.body.user?.username}` : explainDiscordError(u.status, u.body));
+  }
+  return { ok: checks.every((c) => c.ok), checks };
+}
+
+// Todos los miembros del servidor con alguno de esos roles (para sincronizar staff antiguo).
+// Requiere activar "Server Members Intent" en Bot (Developer Portal). Devuelve null si no se puede.
+export async function listMembersWithRoles(cfg, roleIds, fetchImpl = fetch, maxPages = 20) {
+  if (!botEnabled(cfg)) return null;
+  const want = new Set(roleIds.filter(Boolean).map(String));
+  const out = [];
+  let after = "0";
+  for (let page = 0; page < maxPages; page++) {
+    const r = await call(fetchImpl, `${API}/guilds/${cfg.discord.guildId}/members?limit=1000&after=${after}`, { headers: { authorization: `Bot ${cfg.discord.botToken}` } }, 10_000).catch(() => null);
+    if (!r?.ok || !Array.isArray(r.body)) return page === 0 ? null : out;
+    for (const m of r.body) {
+      const roles = (m.roles || []).filter((x) => want.has(String(x)));
+      if (roles.length && m.user && !m.user.bot) out.push({ id: m.user.id, username: m.user.username, globalName: m.user.global_name || null, avatar: m.user.avatar || null, roles });
+    }
+    if (r.body.length < 1000) break;
+    after = r.body[r.body.length - 1].user.id;
+  }
+  return out;
 }
