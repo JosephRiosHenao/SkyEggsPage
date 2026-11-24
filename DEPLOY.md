@@ -269,6 +269,23 @@ Página pública: `/staff/` (generada con `node scripts/build-staff-page.mjs` de
 - **Reportes**: cualquier jugador usa `;Report <jugador> <motivo>` en el juego → `/api/game/staff/report` → panel "Reportes del juego".
 - **Métricas**: "Equipo y métricas" muestra quién está conectado, última vez, horas, progreso y la cobertura por hora (jugadores vs minutos de staff).
 
+## 9. Bot de Discord: videos aprobados, alertas de huevos y botones (2026-11-24)
+
+El bot (mismo `DISCORD_BOT_TOKEN`) ahora también:
+
+- **Anuncia cada video o directo aprobado** en `DISCORD_VIDEO_CHANNEL` (por defecto `1560771030228799510`): miniatura, creador con su foto de Roblox y rango, red, vistas que se actualizan solas, botones *Ver video*, *Jugar Sky Eggs*, *Perfil de Roblox*, *Ser creador* y, con los botones activos, *❤️ Me gusta*, *📊 Más de este creador* y *🔔 Avisarme de videos* (si pones `DISCORD_ROLE_VIDEO_PING`).
+- **Publica las alertas de huevos ABSURDOS** en `DISCORD_EGG_CHANNEL` (por defecto `1567675436681662604`) con ping a `DISCORD_ROLE_EGG_PING`. Reemplaza al webhook del Worker de Cloudflare (que queda solo de respaldo si el juego no tiene el Secret `SkyEggsWeb`). La imagen del huevo se sube como adjunto desde la caché de la página, así que siempre carga. Botones: *Unirse al servidor*, *🏃 ¡Voy!*, *🌐 En mi idioma* (respuesta privada en español, inglés o portugués según el Discord de cada persona), *📊 Estadísticas* y *🔔 Egg Ping*. Cuando alguien agarra el huevo, el mensaje cambia a "✅ X agarró el huevo".
+- Pone sola el rol de creador o de staff a quien fue **aprobado antes de unirse al servidor** (revisa cada 10 min y al entrar al panel).
+
+Pasos:
+
+1. **Botones**: Developer Portal → tu app → *General Information* → copia **Public Key** en `DISCORD_PUBLIC_KEY` del `.env`, reinicia (`docker compose up -d`) y después pon en **Interactions Endpoint URL** `https://skyeggs.pro/api/discord/interactions` y guarda (Discord la prueba en ese momento; si falla, revisa que la API ya tenga la clave).
+2. **Permisos del bot** en los dos canales: Ver canal, Enviar mensajes, Insertar enlaces, Adjuntar archivos, Añadir reacciones y Leer el historial. Para los botones de avisos, *Gestionar roles* con su rol **por encima** de @Egg Ping (y del rol de avisos de videos).
+3. Opcional: `DISCORD_ROLE_VIDEO_PING` (un rol para avisar de videos nuevos) y `DISCORD_EGG_LANG` (`es` por defecto).
+4. **Imágenes del juego** (`MEDIA_DIR`, por defecto `/data/media`, en el mismo volumen): cada servidor del juego manda su catálogo al arrancar y la API guarda los íconos de huevos y mascotas; quedan en `GET /api/catalog` y `/api/media/asset/<id>`. Sin clave se usan las miniaturas públicas de Roblox. Si salen como "imagen privada", crea en Creator Hub una **API key de tu cuenta** (no del grupo: Roblox no deja usar este permiso con claves de grupo) con **Legacy Asset → legacy-asset:manage**, restringida a la IP `173.249.60.5`, y ponla en `ROBLOX_API_KEY`. Luego, en el panel → *Bot de Discord* → *Volver a bajar las imágenes*.
+5. **Publicar el place principal** (EggAlertLogger y WebRewardService cambiaron: alertas a la API y catálogo).
+6. Comprueba en el panel → *Bot de Discord* → *Anuncios, alertas y botones* (estado, *Probar alerta de huevo*, últimos anuncios).
+
 ## Problemas comunes
 
 - **Certificado no se emite:** el DNS aún no apunta al servidor o el puerto 80 está cerrado (el reto HTTP de Let's Encrypt lo necesita).

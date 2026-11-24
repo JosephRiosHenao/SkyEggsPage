@@ -5,13 +5,13 @@ import { join } from "node:path";
 import { doRoll, gamePull, gameAck, gameRedeem, recordVisit, metrics, remainingToday, adminCreateCodes, adminListCodes, adminGift } from "./logic.js";
 import { searchPlayers } from "./roblox.js";
 import { safeEqual, verifyPassword, createSession, checkSession, getSession, deleteSession, readCookie, COOKIE, SESSION_MS, USER_COOKIE, USER_SESSION_MS } from "./auth.js";
-import { discordEnabled, authorizeUrl, fetchDiscordIdentity, rolesFrom, notifyMods, botEnabled, rolesForTier, rolesForStaff, setMemberRoles, diagnoseBot, listMembersWithRoles } from "./discord.js";
+import { discordEnabled, authorizeUrl, fetchDiscordIdentity, rolesFrom, notifyMods, botEnabled, rolesForTier, rolesForStaff, setMemberRoles, diagnoseBot, listMembersWithRoles, getMember } from "./discord.js";
 import * as S from "./staff.js";
 import { publicStaffProgram } from "./staffProgram.js";
 import { getStaffSettings, staffSettingsInfo, saveStaffSettings, resetStaffSettings, ANNOUNCE_EVENTS, MENTIONABLE } from "./staffSettings.js";
 import { pollDiscordChannels, discordChannelsStatus } from "./discordActivity.js";
 import { homeFeed } from "./home.js";
-import { evaluateCreators, setCreatorTier, legacyList, noticeList } from "./lifecycle.js";
+import { evaluateCreators, setCreatorTier, legacyList, noticeList, tierOf } from "./lifecycle.js";
 import { publicCreators, clearPublicCache, creatorsDashboard, creatorDetail, publicStaff } from "./insights.js";
 import { announce, announceOnce, reviewerRanks } from "./announce.js";
 import { LEVEL_KEYS } from "./program.js";
@@ -19,6 +19,10 @@ import { publicProgram } from "./program.js";
 import { tx } from "./db.js";
 import * as C from "./creators.js";
 import { probeViews, updateYtDlp } from "./views.js";
+import { verifyInteraction, interactionsEnabled, REPLY, EPHEMERAL } from "./bot.js";
+import { announceVideo, refreshVideoMessage, handleVideoButton } from "./videos.js";
+import { receiveEggAlert, updateEggAlert, handleEggButton, expireOldAlerts, refreshEggMessage } from "./eggAlerts.js";
+import { saveCatalog, catalog, assetImage, syncAssets, assetStatus } from "./assets.js";
 
 // Límite simple por clave (ventana deslizante en memoria).
 export class Limiter {
@@ -41,6 +45,8 @@ export async function probeEvidence(db, cfg, id, url, probe, log = console, now 
   try { r = await probe(cfg, url); } catch (e) { r = { ok: false, error: e.message }; }
   const out = C.applyProbe(db, cfg, id, r, now);
   if (!r.ok) log.warn(`[views] evidencia ${id}: ${r.error}`);
+  // Vistas nuevas: se actualiza el anuncio de Discord (si cambió bastante).
+  else refreshVideoMessage(db, cfg, id).catch(() => {});
   return out;
 }
 
@@ -62,7 +68,7 @@ export function startViewsTracker({ db, cfg, probe = probeViews, log = console }
   };
   const timer = setInterval(tick, 15 * 60_000);
   setTimeout(tick, 30_000);
-  return () => { clearInterval(timer); clearInterval(pollTimer); };
+  return () => { clearInterval(timer); };
 }
 
 // Pone/quita los roles de Discord de cada cambio de rango (si hay bot). Nunca lanza.
@@ -75,6 +81,13 @@ export async function runRoleJobs(db, cfg, jobs, fetchImpl = fetch, log = consol
     const isStaff = job.staffRank !== undefined;
     const roles = isStaff ? rolesForStaff(cfg, job.staffRank) : rolesForTier(cfg, job.tierKey);
     const r = await setMemberRoles(cfg, job.discordId, roles, `Sky Eggs ${isStaff ? "staff" : "creadores"}: ${job.reason || job.staffRank || job.tierKey}`, fetchImpl);
+    // No está en el servidor: el rol queda pendiente y se pone solo cuando se una (sweepPendingRoles / login).
+    if (r.notMember) {
+      db.prepare("UPDATE discord_users SET in_guild = 0 WHERE id = ?").run(String(job.discordId));
+      C.audit(db, { id: "system", name: "Bot de Discord", role: "system" }, "discord.roles_pending", `#${job.discordId}`, { rango: isStaff ? `staff ${job.staffRank}` : job.tierKey, motivo: "todavía no está en el servidor: se pondrá solo cuando se una" });
+      results.push(r);
+      continue;
+    }
     if (r.ok && isStaff) db.prepare("UPDATE discord_users SET staff_discord = ? WHERE id = ?").run(job.staffRank === "None" ? null : job.staffRank, String(job.discordId));
     else if (r.ok) db.prepare("UPDATE discord_users SET is_creator = ? WHERE id = ?").run(job.tierKey === "None" ? 0 : 1, String(job.discordId));
     else log.warn(`[discord] roles de ${job.discordId}: ${r.errors.join(", ")}`);
@@ -85,11 +98,58 @@ export async function runRoleJobs(db, cfg, jobs, fetchImpl = fetch, log = consol
 }
 
 // Rangos automáticos: revisa a los creadores cada 15 min (ascensos, avisos y bajadas).
+// Roles que tocan según la página (creador aprobado con rango, staff vinculado con rango).
+export function wantedRoleJobs(db, cfg, discordId, memberRoles = null) {
+  const jobs = [];
+  const c = db.prepare("SELECT * FROM creators WHERE discord_id = ? AND link_status = 'approved'").get(String(discordId));
+  if (c) {
+    const tier = tierOf(c);
+    if (tier && tier !== "None") {
+      const want = rolesForTier(cfg, tier).add;
+      if (!memberRoles || want.some((r) => !memberRoles.includes(r))) jobs.push({ discordId: String(discordId), tierKey: tier, reason: "rol pendiente (se unió al servidor)" });
+    }
+  }
+  const s = db.prepare("SELECT rank FROM staff WHERE discord_id = ? AND link_status = 'approved' AND rank != 'None'").get(String(discordId));
+  if (s) {
+    const want = rolesForStaff(cfg, s.rank).add;
+    if (!memberRoles || want.some((r) => !memberRoles.includes(r))) jobs.push({ discordId: String(discordId), staffRank: s.rank, reason: "rol pendiente (se unió al servidor)" });
+  }
+  return jobs;
+}
+
+// Cada 10 min: quien fue aprobado sin estar en el servidor (o sin el rol) y ya se unió recibe su rol.
+// Discord no avisa por REST cuando alguien entra, así que se pregunta por cada pendiente (máx. 25 por vuelta).
+export async function sweepPendingRoles(db, cfg, fetchImpl = fetch, log = console) {
+  if (!botEnabled(cfg)) return { checked: 0, fixed: 0 };
+  const rows = db.prepare(`
+    SELECT d.id FROM discord_users d
+    WHERE (EXISTS (SELECT 1 FROM creators c WHERE c.discord_id = d.id AND c.link_status = 'approved' AND COALESCE(c.tier, 'Creator') != 'None') AND (d.is_creator = 0 OR d.in_guild = 0))
+       OR (EXISTS (SELECT 1 FROM staff s WHERE s.discord_id = d.id AND s.link_status = 'approved' AND s.rank != 'None') AND (d.in_guild = 0 OR COALESCE(d.staff_discord, '') != (SELECT rank FROM staff WHERE discord_id = d.id)))
+    ORDER BY d.last_login DESC LIMIT 25`).all();
+  let fixed = 0;
+  for (const { id } of rows) {
+    const m = await getMember(cfg, id, fetchImpl);
+    if (!m.ok || !m.member) continue;
+    db.prepare("UPDATE discord_users SET in_guild = 1 WHERE id = ?").run(id);
+    const res = await runRoleJobs(db, cfg, wantedRoleJobs(db, cfg, id, m.member.roles || []), fetchImpl, log);
+    if (!res.length) db.prepare("UPDATE discord_users SET is_creator = CASE WHEN EXISTS (SELECT 1 FROM creators WHERE discord_id = ? AND link_status = 'approved') THEN 1 ELSE is_creator END WHERE id = ?").run(id, id);
+    if (res.some((r) => r.ok)) fixed++;
+  }
+  if (fixed) log.info(`[discord] ${fixed} rol(es) pendiente(s) puesto(s)`);
+  return { checked: rows.length, fixed };
+}
+
 export function startLifecycle({ db, cfg, fetchImpl = fetch, log = console }) {
   let running = false;
   let lastDiscordSync = 0;
   // Actividad del staff en Discord: cada 5 min lee los canales elegidos por el Admin.
   let polling = false;
+  let sweeping = false;
+  const sweepTimer = setInterval(async () => {
+    if (sweeping) return;
+    sweeping = true;
+    try { await sweepPendingRoles(db, cfg, fetchImpl, log); } catch (e) { log.error("[discord] roles pendientes", e); } finally { sweeping = false; }
+  }, 10 * 60_000);
   const pollTimer = setInterval(async () => {
     if (polling || !botEnabled(cfg)) return;
     polling = true;
@@ -102,6 +162,10 @@ export function startLifecycle({ db, cfg, fetchImpl = fetch, log = console }) {
     if (running) return;
     running = true;
     try {
+      // Alertas de huevos de servidores que ya cerraron: pasan a "se fue".
+      for (const id of expireOldAlerts(db)) await refreshEggMessage(db, cfg, id, fetchImpl).catch(() => {});
+      // Imágenes del catálogo que faltan (las nuevas de cada update del juego).
+      syncAssets(db, cfg, fetchImpl, log).catch(() => {});
       const out = evaluateCreators(db, cfg);
       if (out.changes.length || out.warnings) {
         log.info(`[creadores] ${out.changes.length} cambio(s) de rango, ${out.warnings} aviso(s)`);
@@ -131,7 +195,7 @@ export function startLifecycle({ db, cfg, fetchImpl = fetch, log = console }) {
   };
   const timer = setInterval(tick, 15 * 60_000);
   setTimeout(tick, 20_000);
-  return () => clearInterval(timer);
+  return () => { clearInterval(timer); clearInterval(pollTimer); clearInterval(sweepTimer); };
 }
 
 export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (c, u) => probeViews(c, u, fetchImpl) }) {
@@ -197,11 +261,19 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
     return s ? S.withStaffRoles(db, cfg, C.getDiscordUser(db, s.discord_id)) : null;
   }
   // Hay que estar en el servidor de Discord de Sky Eggs: sin eso no sabemos sus roles.
-  function requireUser(req) {
+  // Y tener su cuenta de Roblox vinculada (obligatorio desde 2026-11-24): sin eso no sabemos su rango del juego.
+  function requireUser(req, { allowUnlinked = false } = {}) {
     const u = currentUser(req);
     if (!u) throw new HttpError(401, "login_required");
     if (!u.roles.inGuild) throw new HttpError(403, "join_guild");
+    if (!u.roblox && !allowUnlinked) throw new HttpError(403, "link_roblox");
     return u;
+  }
+  // Pone los roles que le faltan a alguien que ya está en el servidor (tras vincular o comprobar).
+  async function reconcileRoles(discordId) {
+    const m = await getMember(cfg, discordId, fetchImpl);
+    if (!m.ok || !m.member) return [];
+    return runRoleJobs(db, cfg, wantedRoleJobs(db, cfg, discordId, m.member.roles || []), fetchImpl, log);
   }
   const passwordAdmin = (req) => checkSession(db, readCookie(req.headers.cookie, COOKIE));
   // Quién hace una acción de staff (queda en el registro con su nombre).
@@ -210,6 +282,7 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
     if (passwordAdmin(req)) return { id: `local:${cfg.adminUser}`, name: `${cfg.adminUser} (panel)`, role: "admin", staffRank: null };
     const u = currentUser(req);
     if (u && !u.roles.inGuild) throw new HttpError(403, "join_guild");
+    if (u && !u.roblox) throw new HttpError(403, "link_roblox");
     const name = u && (u.globalName ? `${u.globalName} (@${u.username})` : `@${u.username}`);
     if (u && u.roles.admin) return { id: u.id, name, role: "admin", staffRank: u.roles.staffRank };
     const need = adminOnly ? "admin" : min;
@@ -317,6 +390,90 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
     // ----- Juego (servidores de Roblox) -----
     "POST /api/game/pull": async (req) => { requireGame(req); return gamePull(db, cfg, await readJson(req, 64_000)); },
     "POST /api/game/ack": async (req) => { requireGame(req); return gameAck(db, await readJson(req, 32_000)); },
+    // Alertas de huevos absurdos (el bot publica en Discord) y catálogo de assets del juego.
+    "POST /api/game/egg-alert": async (req) => { requireGame(req); return receiveEggAlert(db, cfg, await readJson(req, 8192), fetchImpl, log); },
+    "POST /api/game/egg-alert/update": async (req) => { requireGame(req); return updateEggAlert(db, cfg, await readJson(req, 2048), fetchImpl); },
+    "POST /api/game/catalog": async (req) => {
+      requireGame(req);
+      const b = await readJson(req, 400_000);
+      const out = saveCatalog(db, b.items);
+      syncAssets(db, cfg, fetchImpl, log).catch((e) => log.warn(`[assets] ${e.message}`));
+      return out;
+    },
+    // Catálogo público (para la web): huevos y mascotas con su imagen guardada en la página.
+    "GET /api/catalog": async (req) => {
+      if (!limits.publicList.take(ipOf(req))) throw new HttpError(429, "slow_down");
+      return { items: catalog(db, cfg) };
+    },
+    // Estado del bot: botones, canales, últimas alertas y anuncios, imágenes guardadas.
+    "GET /api/mod/bot/status": async (req) => {
+      staffActor(req);
+      const d = cfg.discord;
+      return {
+        bot: botEnabled(cfg), interactions: interactionsEnabled(cfg), interactionsUrl: `${cfg.siteUrl}/api/discord/interactions`,
+        videoChannel: d.videoChannel, videoPingRole: d.videoPingRole || null, eggChannel: d.eggChannel, eggPingRole: d.eggPingRole || null, eggLang: d.eggLang,
+        assets: { ...assetStatus(db), apiKey: Boolean(cfg.roblox.apiKey) },
+        alerts: db.prepare("SELECT id, asset, place, studio, status, grabbed_by_name, created_at, message_id IS NOT NULL AS posted, post_error FROM egg_alerts ORDER BY id DESC LIMIT 8").all(),
+        videos: db.prepare("SELECT id, title, platform, url, views, announce_msg IS NOT NULL AS posted, announce_error, reviewed_at FROM evidences WHERE status = 'approved' ORDER BY reviewed_at DESC LIMIT 8").all(),
+      };
+    },
+    // Prueba: alerta [STUDIO] con un huevo del catálogo (o el último que salió).
+    "POST /api/mod/bot/test-egg": async (req) => {
+      checkOrigin(req); const a = requireAdmin(req);
+      const egg = db.prepare("SELECT * FROM game_assets WHERE kind = 'egg' ORDER BY RANDOM() LIMIT 1").get();
+      const out = await receiveEggAlert(db, cfg, {
+        key: `test:${Date.now()}`, studio: true, asset: egg?.name || "Moon Egg", rarity: egg?.rarity || "Legendary", size: "absurdo",
+        weight: 777, value: 1_000_000, place: "Prueba", iconId: egg?.asset_id || null, jobId: "studio", players: 1, maxPlayers: 12,
+        i18n: { es: { place: "Prueba desde el panel" }, en: { place: "Test from the panel" }, pt: { place: "Teste do painel" } },
+      }, fetchImpl, log);
+      C.audit(db, a, "bot.test_egg", null, { id: out.id });
+      return out;
+    },
+    // Volver a publicar el anuncio de un video aprobado que no salió (p. ej. el bot no tenía permisos).
+    "POST /api/mod/bot/announce-video": async (req) => {
+      checkOrigin(req); const a = staffActor(req);
+      const b = await readJson(req, 256);
+      db.prepare("UPDATE evidences SET announce_msg = NULL WHERE id = ? AND announce_msg IS NULL").run(Number(b.id));
+      const out = await announceVideo(db, cfg, b.id, fetchImpl, log);
+      C.audit(db, a, "bot.announce_video", null, { id: Number(b.id), ok: out.sent, motivo: out.reason || null });
+      return out;
+    },
+    "GET /api/mod/assets": async (req) => { staffActor(req); return { ...assetStatus(db), apiKey: Boolean(cfg.roblox.apiKey), items: catalog(db, cfg) }; },
+    "POST /api/mod/assets/sync": async (req) => {
+      checkOrigin(req); const a = requireAdmin(req);
+      const b = await readJson(req, 256);
+      syncAssets(db, cfg, fetchImpl, log, { force: b.force === true }).catch(() => {});
+      C.audit(db, a, "assets.sync", null, { force: b.force === true });
+      return { ok: true, started: true };
+    },
+    // Botones de Discord (Interactions Endpoint URL). Discord firma cada petición.
+    "POST /api/discord/interactions": async (req) => {
+      const chunks = []; let size = 0;
+      for await (const c of req) { size += c.length; if (size > 64_000) throw new HttpError(413, "too_large"); chunks.push(c); }
+      const raw = Buffer.concat(chunks);
+      if (!verifyInteraction(cfg.discord.publicKey, req.headers["x-signature-ed25519"], req.headers["x-signature-timestamp"], raw)) throw new HttpError(401, "bad_signature");
+      let it;
+      try { it = JSON.parse(raw.toString("utf8")); } catch { throw new HttpError(400, "bad_json"); }
+      if (it.type === 1) return { type: REPLY.PONG };
+      if (it.type !== 3) return { type: REPLY.MESSAGE, data: { content: "🥚", flags: EPHEMERAL } };
+      const id = String(it.data?.custom_id || "");
+      let out;
+      try {
+        out = id.startsWith("v") ? await handleVideoButton(db, cfg, it, fetchImpl) : await handleEggButton(db, cfg, it, fetchImpl);
+      } catch (e) {
+        log.error("[discord] botón", e);
+        out = { type: REPLY.MESSAGE, data: { content: "Algo salió mal. Inténtalo de nuevo.", flags: EPHEMERAL } };
+      }
+      // Confirmación privada aparte (cuando el botón actualiza el mensaje público).
+      if (out.followup) {
+        const text = out.followup; delete out.followup;
+        setTimeout(() => fetchImpl(`https://discord.com/api/v10/webhooks/${it.application_id}/${it.token}`, {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ content: text, flags: EPHEMERAL, allowed_mentions: { parse: [] } }),
+        }).catch(() => {}), 400);
+      }
+      return out;
+    },
     "POST /api/game/redeem": async (req) => {
       requireGame(req);
       const body = await readJson(req, 2048);
@@ -407,6 +564,8 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
       }
       const roles = rolesFrom(cfg, ident.member);
       C.upsertDiscordUser(db, ident.user, roles);
+      // Aprobado antes de unirse al servidor (o sin el rol): se le pone ahora que está.
+      if (roles.inGuild) await runRoleJobs(db, cfg, wantedRoleJobs(db, cfg, ident.user.id, ident.member?.roles || []), fetchImpl, log);
       const token = createSession(db, Date.now(), "discord", String(ident.user.id), USER_SESSION_MS);
       log.info(`[discord] login ${ident.user.username} (${ident.user.id}) admin=${roles.admin} mod=${roles.moderator} creador=${roles.creator}`);
       return { redirect: row.next, headers: { "set-cookie": [clear, userCookie(token, USER_SESSION_MS / 1000)] } };
@@ -423,6 +582,18 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
     },
 
     // ----- Programa de creadores -----
+    // Cuenta de Roblox del usuario (obligatoria para usar el panel).
+    "POST /api/account/roblox": async (req) => {
+      checkOrigin(req);
+      const u = requireUser(req, { allowUnlinked: true });
+      if (!limits.apply.take(`r${u.id}`)) throw new HttpError(429, "slow_down");
+      const b = await readJson(req, 256);
+      const out = run(() => C.linkAccount(db, u.id, b.robloxUserId));
+      C.audit(db, { id: u.id, name: u.globalName ? `${u.globalName} (@${u.username})` : `@${u.username}`, role: "user" }, "account.roblox", `@${out.roblox.name}`, { roblox: out.roblox.userId });
+      // Si ya era creador o staff aprobado y le faltaba el rol en Discord, se pone ahora.
+      await reconcileRoles(u.id);
+      return out;
+    },
     "GET /api/creators/program": async () => publicProgram(cfg),
     // Carrusel: creadores aprobados que no ocultaron su perfil (nombre, foto, rango y redes).
     "GET /api/staff/public": async (req) => {
@@ -589,7 +760,7 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
       const out = run(() => tx(db, () => S.reviewStaffApplication(db, a, b)));
       const r = out.job ? await runRoleJobs(db, cfg, [out.job], fetchImpl, log) : [];
       celebrate(out.job);
-      return { ok: true, status: out.status, discordRole: !out.job ? null : botEnabled(cfg) ? (r[0]?.ok ? "ok" : "error") : "manual" };
+      return { ok: true, status: out.status, discordRole: !out.job ? null : botEnabled(cfg) ? (r[0]?.ok ? "ok" : r[0]?.notMember ? "pending_join" : "error") : "manual" };
     },
     "POST /api/mod/staff/link": async (req) => {
       checkOrigin(req); const a = staffActor(req); const b = await readJson(req, 1024);
@@ -604,7 +775,7 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
       const out = run(() => tx(db, () => S.changeStaffRank(db, a, b)));
       const r = await runRoleJobs(db, cfg, [out.job], fetchImpl, log);
       celebrate(out.job);
-      return { ok: true, discord: botEnabled(cfg) ? (r[0]?.ok ? "ok" : "error") : "manual" };
+      return { ok: true, discord: botEnabled(cfg) ? (r[0]?.ok ? "ok" : r[0]?.notMember ? "pending_join" : "error") : "manual" };
     },
     "POST /api/mod/staff/promotion": async (req) => {
       checkOrigin(req); const a = staffActor(req); const b = await readJson(req, 1024);
@@ -702,7 +873,7 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
         clearPublicCache();
         if (app && botEnabled(cfg)) {
           const r = await runRoleJobs(db, cfg, [{ discordId: app.discord_id, tierKey: "Creator", reason: "solicitud aprobada" }], fetchImpl, log);
-          out.discordRole = r[0]?.ok ? "ok" : "error";
+          out.discordRole = r[0]?.ok ? "ok" : r[0]?.notMember ? "pending_join" : "error";
         } else out.discordRole = "manual";
       }
       // Rechazada: si tenía el rol de Content Creator (p. ej. creador antiguo), se le quita.
@@ -727,6 +898,9 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
     "POST /api/mod/evidence": async (req) => {
       checkOrigin(req); const a = staffActor(req); const b = await readJson(req, 2048);
       const out = run(() => C.reviewEvidence(db, a, b));
+      // Aprobada: se anuncia en el canal de videos de Discord (una sola vez). Vistas fijadas: se actualiza.
+      if (b.action === "approve" && out.status === "approved") announceVideo(db, cfg, b.id, fetchImpl, log);
+      else if (b.action === "update") refreshVideoMessage(db, cfg, b.id, fetchImpl).catch(() => {});
       // Las vistas nuevas pueden subir el rango al momento.
       try {
         const ev = evaluateCreators(db, cfg);
@@ -774,11 +948,22 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
     res.end(readFileSync(path));
   }
 
+  // Imágenes del juego guardadas en la página (solo assets del catálogo: no es un proxy abierto).
+  async function serveAsset(res, name) {
+    const id = Number((name.match(/^(\d{5,20})(\.png)?$/) || [])[1]);
+    if (!id || !db.prepare("SELECT 1 FROM game_assets WHERE asset_id = ?").get(id)) throw new HttpError(404, "not_found");
+    const img = await assetImage(db, cfg, id, fetchImpl);
+    if (!img) throw new HttpError(404, "not_found");
+    res.writeHead(200, { "content-type": img.type, "cache-control": "public, max-age=86400", "x-content-type-options": "nosniff", "content-security-policy": "default-src 'none'; sandbox" });
+    res.end(img.bytes);
+  }
+
   return async function handler(req, res) {
     const url = new URL(req.url, "http://local");
     const route = routes[`${req.method} ${url.pathname}`];
     try {
       if (req.method === "GET" && url.pathname.startsWith("/api/files/")) return serveFile(req, res, url.pathname.slice(11));
+      if (req.method === "GET" && url.pathname.startsWith("/api/media/asset/")) return await serveAsset(res, url.pathname.slice(17));
       if (!route) throw new HttpError(404, "not_found");
       const out = await route(req, url);
       if (out && out.redirect) {

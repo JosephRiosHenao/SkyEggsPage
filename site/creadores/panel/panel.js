@@ -10,6 +10,7 @@
   const ERRORS = {
     login_required: "Tu sesión terminó. Entra de nuevo con Discord.",
     join_guild: "Tienes que estar en el servidor de Discord de Sky Eggs para usar el panel.",
+    link_roblox: "Vincula tu cuenta de Roblox para seguir usando el panel.",
     creator_only: "Esta sección es para creadores con el rol de Content Creator en Discord.",
     forbidden: "No tienes permiso para esto.",
     slow_down: "Vas muy rápido. Espera un momento.",
@@ -147,7 +148,7 @@
       if (okText) flash(typeof okText === "function" ? okText(out) : okText, "ok");
       if (after) await after(out);
     } catch (e) {
-      if (e.status === 401 || e.message === "join_guild") return start();
+      if (e.status === 401 || e.message === "join_guild" || e.message === "link_roblox") return start();
       flash(errText(e), "bad");
     } finally { btn.disabled = false; }
   }
@@ -226,7 +227,7 @@
     try {
       if (RENDER[key]) await RENDER[key](section);
     } catch (e) {
-      if (e.status === 401 || e.message === "join_guild") return start();
+      if (e.status === 401 || e.message === "join_guild" || e.message === "link_roblox") return start();
       section.replaceChildren(el("div", { class: "notice notice--bad" }, errText(e)));
     }
     window.scrollTo({ top: 0 });
@@ -304,10 +305,12 @@
         el("label", {}, "Red", el("select", { name: `ptype${i}` }, ...["YouTube", "TikTok", "Twitch", "Kick", "Instagram", "Facebook", "Otra"].map((p) => el("option", {}, p)))),
         el("label", {}, "Enlace a tu perfil o canal", el("input", { name: `purl${i}`, type: "url", placeholder: "https://…", maxlength: "400", required: i === 0 })),
         el("label", {}, "Seguidores", el("input", { name: `pfol${i}`, type: "number", min: "0", placeholder: "0" })));
-      let account = null;
+      // La cuenta de Roblox es la vinculada al panel (obligatoria).
+      const linked = me.user.roblox;
+      let account = linked ? { userId: linked.userId, name: linked.name, displayName: linked.displayName || linked.name } : null;
       const accountBox = el("div");
       const paintAccount = () => accountBox.replaceChildren(account
-        ? el("div", { class: "form" }, el("label", {}, "Tu cuenta de Roblox"), accountChip(account, () => { account = null; paintAccount(); }), el("p", { class: "hint" }, "Un moderador confirmará que esta es tu cuenta."))
+        ? el("div", { class: "form" }, el("label", {}, "Tu cuenta de Roblox"), accountChip(account, linked ? null : () => { account = null; paintAccount(); }), el("p", { class: "hint" }, "Es la cuenta vinculada a tu panel. Un moderador confirmará que es tuya."))
         : accountPicker((p) => { account = p; paintAccount(); }));
       paintAccount();
       const form = el("form", { class: "form" },
@@ -731,7 +734,8 @@
         el("div", { class: "item__head" },
           el("div", { class: "app-card__who" }, egg(name),
             el("div", {}, el("span", { class: "item__title" }, name), el("p", { class: "item__meta" }, a.user ? `Discord @${a.user.username}` : "usuario desconocido"))),
-          el("div", { class: "inline" }, ...issueFlags(a.platforms).filter(Boolean), pill(a.status, a.status === "contacted" ? "Contactado" : "Nueva"))),
+          el("div", { class: "inline" }, a.user && !a.user.roles.inGuild ? flag("🚪 No está en el Discord", "Puedes aprobarla: el rol de Discord se le pone solo cuando se una al servidor") : null,
+            ...issueFlags(a.platforms).filter(Boolean), pill(a.status, a.status === "contacted" ? "Contactado" : "Nueva"))),
         el("div", { class: "app-card__grid" },
           field("Roblox", ...(a.roblox_user_id ? robloxBits(a.roblox_user_id, a.roblox_name, null, a.player) : [a.roblox_name])),
           field("Enviada", when(a.created_at), a.email ? el("span", { class: "sub" }, a.email) : el("span", { class: "sub" }, "sin correo")),
@@ -743,7 +747,7 @@
         editSlot,
         el("div", { class: "item__actions" }, note,
           a.status === "pending" ? btn("Contactado", "btn--white", (b) => act(b, () => api("/api/mod/application", { id: a.id, action: "contacted", note: note.value }), "Marcada como contactada.", refreshMod)) : null,
-          btn("Aprobar (y confirmar su Roblox)", "btn--green", (b) => act(b, () => api("/api/mod/application", { id: a.id, action: "approve", note: note.value }), (o) => `Aprobada${o.linked ? " y cuenta de Roblox vinculada" : ""}. ${o.discordRole === "ok" ? "El rol de Content Creator se puso solo en Discord." : o.discordRole === "error" ? "No se pudo poner el rol en Discord: dáselo a mano." : "Dale el rol de Content Creator en Discord."} El rango Creator y el correo de bienvenida llegan solos al juego.`, refreshMod)),
+          btn("Aprobar (y confirmar su Roblox)", "btn--green", (b) => act(b, () => api("/api/mod/application", { id: a.id, action: "approve", note: note.value }), (o) => `Aprobada${o.linked ? " y cuenta de Roblox vinculada" : ""}. ${o.discordRole === "ok" ? "El rol de Content Creator se puso solo en Discord." : o.discordRole === "pending_join" ? "Todavía no está en el servidor de Discord: el rol se le pondrá solo cuando se una (el panel le pide unirse)." : o.discordRole === "error" ? "No se pudo poner el rol en Discord: dáselo a mano." : "Dale el rol de Content Creator en Discord."} El rango Creator y el correo de bienvenida llegan solos al juego.`, refreshMod)),
           btn("Rechazar", "btn--red", (b) => { if (!note.value.trim()) return flash("Escribe el motivo en la nota.", "bad"); act(b, () => api("/api/mod/application", { id: a.id, action: "reject", note: note.value }), (o) => `Rechazada.${o.discordRole === "removed" ? " Se le quitó el rol de Content Creator en Discord." : o.discordRole === "error" ? " No se pudo quitar el rol en Discord: hazlo a mano si lo tenía." : ""} Si tenía rango en el juego, se le quita al entrar.`, refreshMod); }),
           btn("✏️ Corregir datos", "btn--white", () => { if (!editSlot.firstChild?.isConnected) editSlot.replaceChildren(appEditor(a, refreshMod)); editSlot.firstChild.scrollIntoView({ block: "nearest", behavior: "smooth" }); })));
     });
@@ -1362,7 +1366,7 @@
           el("dl", {}, ...Object.entries(a.answers).filter(([, v]) => v).flatMap(([k, v]) => [el("dt", {}, Q[k] || k), el("dd", {}, v === "si" ? "Sí" : v === "no" ? "No" : v)]))),
         el("div", { class: "item__actions" }, note,
           a.status === "pending" ? btn("Contactado", "btn--white", (b) => act(b, () => api("/api/mod/staff/application", { id: a.id, action: "contacted", note: note.value }), "Marcada como contactada.", refreshMod)) : null,
-          btn("Aprobar como Helper", "btn--green", (b) => act(b, () => api("/api/mod/staff/application", { id: a.id, action: "approve", note: note.value }), (o) => `Aprobado. ${o.discordRole === "ok" ? "Rol Helper puesto en Discord." : o.discordRole === "error" ? "No se pudo poner el rol en Discord (revisa «Bot de Discord»)." : "Dale el rol Helper en Discord."} La etiqueta y los comandos llegan solos al juego.`, refreshMod)),
+          btn("Aprobar como Helper", "btn--green", (b) => act(b, () => api("/api/mod/staff/application", { id: a.id, action: "approve", note: note.value }), (o) => `Aprobado. ${o.discordRole === "ok" ? "Rol Helper puesto en Discord." : o.discordRole === "pending_join" ? "Todavía no está en el servidor: el rol se le pondrá solo cuando se una." : o.discordRole === "error" ? "No se pudo poner el rol en Discord (revisa «Bot de Discord»)." : "Dale el rol Helper en Discord."} La etiqueta y los comandos llegan solos al juego.`, refreshMod)),
           btn("Rechazar", "btn--red", (b) => { if (!note.value.trim()) return flash("Escribe el motivo en la nota.", "bad"); act(b, () => api("/api/mod/staff/application", { id: a.id, action: "reject", note: note.value }), "Rechazada.", refreshMod); })));
     })) : empty("No hay solicitudes de Helper pendientes.");
     body.replaceChildren(...[linkBox && el("h3", {}, "Cuentas de staff antiguo por confirmar"), linkBox, el("h3", {}, "Solicitudes de Helper"), apps].filter(Boolean));
@@ -1430,6 +1434,41 @@
         el("li", {}, "403 = al bot le falta «Gestionar roles» o su rol está por debajo del rol que intenta poner."),
         el("li", {}, "Para leer quién tiene rol de staff en Discord, activa «Server Members Intent» en la pestaña Bot de tu app.")),
       el("div", { class: "form-actions" }, uid, btn("Comprobar", "btn--yolk", run)), out);
+    body.parentElement.after(await botStatusBox());
+  }
+
+  // Anuncios de videos, alertas de huevos, botones e imágenes del juego.
+  async function botStatusBox() {
+    const box = el("section", { class: "box" }, el("h2", {}, "📣 Anuncios, alertas y botones"));
+    let st;
+    try { st = await api("/api/mod/bot/status"); } catch (e) { box.append(el("div", { class: "notice notice--bad" }, errText(e))); return box; }
+    const ch = (id) => (id ? el("code", {}, `#${id}`) : "—");
+    const check = (ok, label, detail) => el("li", { class: ok ? "ok" : "bad" }, el("strong", {}, `${ok ? "✔" : "✖"} ${label}`), detail ? el("span", { class: "small muted" }, " — ", detail) : null);
+    box.append(el("ul", { class: "checks" },
+      check(st.bot, "Bot conectado (DISCORD_BOT_TOKEN)", st.bot ? null : "sin token no hay anuncios ni alertas"),
+      check(st.interactions, "Botones activos (DISCORD_PUBLIC_KEY + Interactions Endpoint URL)", st.interactions ? "funcionan ❤️ Me gusta, ¡Voy!, En mi idioma, Estadísticas y los avisos" : el("span", {}, "pon la Public Key en el .env y en el Developer Portal la URL ", el("code", {}, st.interactionsUrl))),
+      check(true, "Canal de videos aprobados", el("span", {}, ch(st.videoChannel), st.videoPingRole ? " · avisa a " : " · sin rol de aviso (DISCORD_ROLE_VIDEO_PING)", st.videoPingRole ? ch(st.videoPingRole) : null)),
+      check(true, "Canal de alertas de huevos", el("span", {}, ch(st.eggChannel), " · ping a ", ch(st.eggPingRole), ` · idioma ${st.eggLang}`)),
+      check(st.assets.total > 0, `Imágenes del juego guardadas: ${st.assets.saved || 0} de ${st.assets.total || 0}`, st.assets.total ? (st.assets.apiKey ? "con ROBLOX_API_KEY (originales)" : "sin ROBLOX_API_KEY: miniaturas públicas (las privadas fallan)") : "el juego manda el catálogo al arrancar cada servidor")));
+    const acts = el("div", { class: "form-actions" },
+      isAdmin() ? btn("🥚 Probar alerta de huevo", "btn--yolk", (b) => act(b, () => api("/api/mod/bot/test-egg", {}), "Alerta de prueba enviada al canal de huevos (sale como [STUDIO]).", () => show(current))) : null,
+      isAdmin() ? btn("🖼️ Volver a bajar las imágenes", "btn--white", (b) => act(b, () => api("/api/mod/assets/sync", { force: true }), "Bajando las imágenes en segundo plano. Vuelve en un minuto.")) : null);
+    box.append(acts);
+    const when2 = (t) => (t ? ago(t) : "—");
+    box.append(el("h3", {}, "Últimas alertas de huevos"), st.alerts.length ? el("div", { class: "tbl-wrap" }, el("table", { class: "tbl" },
+      el("thead", {}, el("tr", {}, ...["", "Huevo", "Isla", "Estado", "Discord", "Cuándo"].map((h) => el("th", {}, h)))),
+      el("tbody", {}, ...st.alerts.map((x) => el("tr", {}, el("td", {}, `#${x.id}`), el("td", {}, x.asset, x.studio ? el("span", { class: "sub" }, "prueba") : null), el("td", {}, x.place || "—"),
+        el("td", {}, { active: "🟢 en el mapa", grabbed: `✅ ${x.grabbed_by_name || ""}`, gone: "⌛ se fue" }[x.status] || x.status),
+        el("td", {}, x.posted ? pill("approved", "Publicada") : pill("rejected", "No salió"), x.post_error ? el("span", { class: "sub" }, x.post_error) : null),
+        el("td", { class: "nowrap" }, when2(x.created_at)))))))
+      : empty("Todavía no hay alertas. Llegan cuando nace un huevo absurdo en el juego publicado."));
+    box.append(el("h3", {}, "Últimos videos aprobados"), st.videos.length ? el("div", { class: "tbl-wrap" }, el("table", { class: "tbl" },
+      el("thead", {}, el("tr", {}, el("th", {}, "Video"), el("th", {}, "Red"), el("th", { class: "num-cell" }, "Vistas"), el("th", {}, "Discord"), el("th", {}, ""))),
+      el("tbody", {}, ...st.videos.map((v) => el("tr", {}, el("td", {}, link(v.url, v.title || "abrir")), el("td", {}, v.platform), el("td", { class: "num-cell" }, n(v.views)),
+        el("td", {}, v.posted ? pill("approved", "Anunciado") : pill("pending", "Sin anunciar"), v.announce_error ? el("span", { class: "sub" }, v.announce_error) : null),
+        el("td", { class: "actions-cell" }, v.posted ? null : btn("Anunciar", "btn--white", (b) => act(b, () => api("/api/mod/bot/announce-video", { id: v.id }), (o) => (o.sent ? "Anunciado en Discord." : `No salió: ${o.reason}`), () => show(current)))))))))
+      : empty("Todavía no hay videos aprobados."));
+    return box;
   }
 
   // ---------- Inicio por rol ----------
@@ -1629,6 +1668,42 @@
   }
 
   // ---------- Arranque ----------
+  // Ventana obligatoria: paso "server" (unirse al Discord) o "roblox" (vincular la cuenta).
+  function showGate(step) {
+    const u = me.user;
+    $("view-login").hidden = true; $("view-app").hidden = true; $("gate").hidden = false; $("gate").querySelector(".gate__card").prepend($("flash")); // avisos dentro de la ventana
+    $("gate").querySelector(".gate__card").prepend($("flash")); // los avisos se ven dentro de la ventana
+    document.body.classList.remove("is-app", "nav-open"); $("nav").replaceChildren(); $("page-title").textContent = "Panel";
+    $("who").hidden = false;
+    $("who-pic").src = u.avatar || "/img/icon-192.png";
+    $("who-name").textContent = u.globalName || u.username;
+    $("who-badges").replaceChildren();
+    $("gate-name").textContent = u.globalName || u.username;
+    const order = ["discord", "server", "roblox"];
+    for (const li of $("gate").querySelectorAll("[data-step]")) {
+      const i = order.indexOf(li.dataset.step), cur = order.indexOf(step);
+      li.className = i < cur ? "is-done" : i === cur ? "is-current" : "";
+    }
+    $("gate-join").hidden = step !== "server";
+    $("gate-link").hidden = step !== "roblox";
+    $("gate").setAttribute("aria-labelledby", step === "server" ? "gate-title" : "gate-link-title");
+    if (step === "server") {
+      $("join-check").href = `/api/auth/discord/login?next=${encodeURIComponent("/creadores/panel/" + (location.hash || ""))}`;
+      let checked = false;
+      try { checked = sessionStorage.getItem("se-join-check") === "1"; sessionStorage.removeItem("se-join-check"); } catch { /* sin almacenamiento */ }
+      if (checked) flash("Todavía no te vemos en el servidor. Revisa que te uniste con esta misma cuenta de Discord y vuelve a intentarlo.", "bad");
+    } else {
+      $("gate-picker").replaceChildren(accountPicker(async (p) => {
+        try {
+          await api("/api/account/roblox", { robloxUserId: p.userId });
+          flash(`¡Listo! Tu cuenta @${p.name} quedó vinculada.`, "ok");
+          start();
+        } catch (e) { flash(errText(e), "bad"); showGate("roblox"); }
+      }, "Tu usuario de Roblox (o nombre visible)"));
+      $("gate-picker").querySelector("input")?.focus();
+    }
+  }
+
   async function start() {
     const params = new URLSearchParams(location.search);
     const loginErr = params.get("error");
@@ -1641,28 +1716,19 @@
     }
     if (loginErr) flash(LOGIN_ERRORS[loginErr] || "No se pudo iniciar sesión.", "bad");
     if (!me.user) {
-      $("view-app").hidden = true; $("who").hidden = true; $("view-join").hidden = true; $("view-login").hidden = false;
+      $("view-app").hidden = true; $("who").hidden = true; $("gate").hidden = true; $("view-login").hidden = false; $("contenido").prepend($("flash"));
+      $("contenido").prepend($("flash"));
       document.body.classList.remove("is-app"); $("nav").replaceChildren(); $("page-title").textContent = "Panel";
       $("login-btn").href = `/api/auth/discord/login?next=${encodeURIComponent("/creadores/panel/" + (location.hash || ""))}`;
       if (!me.discord) flash(LOGIN_ERRORS.discord_off, "bad");
       return;
     }
-    // Sin estar en el servidor de Discord no hay panel: primero tiene que unirse.
-    if (!me.user.roles.inGuild) {
-      $("view-login").hidden = true; $("view-app").hidden = true; $("view-join").hidden = false;
-      document.body.classList.remove("is-app", "nav-open"); $("nav").replaceChildren(); $("page-title").textContent = "Panel";
-      $("who").hidden = false;
-      $("who-pic").src = me.user.avatar || "/img/icon-192.png";
-      $("who-name").textContent = me.user.globalName || me.user.username;
-      $("who-badges").replaceChildren();
-      $("join-name").textContent = me.user.globalName || me.user.username;
-      $("join-check").href = `/api/auth/discord/login?next=${encodeURIComponent("/creadores/panel/" + (location.hash || ""))}`;
-      let checked = false;
-      try { checked = sessionStorage.getItem("se-join-check") === "1"; sessionStorage.removeItem("se-join-check"); } catch { /* sin almacenamiento */ }
-      if (checked) flash("Todavía no te vemos en el servidor. Revisa que te uniste con esta misma cuenta de Discord y vuelve a intentarlo.", "bad");
-      return;
-    }
-    $("view-join").hidden = true;
+    // Requisitos (obligatorios): estar en el servidor de Discord y tener la cuenta de Roblox vinculada.
+    const needServer = !me.user.roles.inGuild;
+    const needRoblox = !needServer && !me.user.roblox;
+    if (needServer || needRoblox) return showGate(needServer ? "server" : "roblox");
+    $("gate").hidden = true; $("contenido").prepend($("flash"));
+    $("contenido").prepend($("flash"));
     $("view-login").hidden = true; $("view-app").hidden = false; $("who").hidden = false;
     document.body.classList.add("is-app");
     const u = me.user;

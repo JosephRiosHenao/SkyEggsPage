@@ -3,7 +3,7 @@
 // y con Discord (bot), tareas mensuales con evidencias, ascensos, staff antiguo (fecha límite de
 // vínculo), reportes del juego y métricas de actividad.
 import { randomBytes } from "node:crypto";
-import { Fail, audit, monthOf, monthStartMs, getDiscordUser, weekOf, weekStartMs } from "./creators.js";
+import { Fail, audit, monthOf, monthStartMs, getDiscordUser, weekOf, weekStartMs, syncAccount } from "./creators.js";
 import { RANK_KEYS, rankIndex, RANK_BY_KEY, TASKS, TASK_BY_KEY, QUESTIONS } from "./staffProgram.js";
 import { getStaffSettings } from "./staffSettings.js";
 import { discordMinutesByDay } from "./discordActivity.js";
@@ -152,6 +152,7 @@ export function reviewStaffApplication(db, actor, body, now = Date.now()) {
         rank = 'None', link_status = 'approved', joined_at = excluded.joined_at, strikes = 0, eval_month = NULL, warn_month = NULL,
         reviewed_by = excluded.reviewed_by, reviewed_at = excluded.reviewed_at`)
       .run(a.discord_id, a.roblox_user_id, p.name, p.display_name, now, actor.name, now);
+    syncAccount(db, a.discord_id, a.roblox_user_id, now);
     job = setStaffRank(db, actor, a.discord_id, "Helper", null, now);
   }
   audit(db, actor, `staffapp.${body.action}`, nameOf(db, a.discord_id), { id: a.id, roblox: `${a.roblox_name} (${a.roblox_user_id})`, note });
@@ -230,6 +231,7 @@ export function requestStaffLink(db, cfg, user, body, now = Date.now()) {
     .run(String(user.id), p.user_id, p.name, p.display_name, auto ? "None" : rank, auto ? "approved" : "pending", now);
   let job = null;
   if (auto) {
+    syncAccount(db, user.id, p.user_id, now);
     job = setStaffRank(db, { id: user.id, name: nameOf(db, user.id), role: "staff" }, user.id, rank, null, now);
     db.prepare("UPDATE staff_legacy_discord SET status = 'linked' WHERE discord_id = ?").run(String(user.id));
     db.prepare("UPDATE staff_legacy_game SET status = 'linked', updated_at = ? WHERE roblox_user_id = ?").run(now, p.user_id);
@@ -251,6 +253,7 @@ export function reviewStaffLink(db, actor, body, now = Date.now()) {
   if (action !== "approve") throw new Fail("bad_action");
   const rank = s.rank;
   db.prepare("UPDATE staff SET link_status = 'approved', rank = 'None', reviewed_by = ?, reviewed_at = ? WHERE discord_id = ?").run(actor.name, now, s.discord_id);
+  syncAccount(db, s.discord_id, s.roblox_user_id, now);
   const job = setStaffRank(db, actor, s.discord_id, rank, null, now);
   db.prepare("UPDATE staff_legacy_discord SET status = 'linked' WHERE discord_id = ?").run(s.discord_id);
   db.prepare("UPDATE staff_legacy_game SET status = 'linked', updated_at = ? WHERE roblox_user_id = ?").run(now, s.roblox_user_id);

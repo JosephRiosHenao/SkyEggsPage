@@ -55,12 +55,30 @@ export const config = {
     // Programa de staff (2026-11-23): roles de Discord de cada rango.
     // Canal de anuncios del staff (el bot escribe y menciona al rango que corresponde).
     announceChannel: process.env.DISCORD_ANNOUNCE_CHANNEL || "1566631711910133860",
+    // Bot más completo (2026-11-24): clave pública para los botones (Interactions Endpoint URL =
+    // <sitio>/api/discord/interactions), canal de videos aprobados y canal de alertas de huevos.
+    publicKey: process.env.DISCORD_PUBLIC_KEY || "",
+    videoChannel: process.env.DISCORD_VIDEO_CHANNEL || "1560771030228799510",
+    videoPingRole: process.env.DISCORD_ROLE_VIDEO_PING || "",
+    eggChannel: process.env.DISCORD_EGG_CHANNEL || "1567675436681662604",
+    eggPingRole: process.env.DISCORD_ROLE_EGG_PING || "1567693893963612250",
+    // Idioma del mensaje público (los botones "En mi idioma" responden en el de cada persona).
+    eggLang: process.env.DISCORD_EGG_LANG || "es",
     staffRoles: {
       Helper: process.env.DISCORD_ROLE_HELPER || "1563735797444771961",
       ModeratorJr: process.env.DISCORD_ROLE_MODERATORJR || "1563736116300087337",
       Moderator: process.env.DISCORD_ROLE_STAFF_MODERATOR || "1563736465522036736",
     },
   },
+  // Roblox: juego (para enlaces) y API key de Open Cloud OPCIONAL (permiso legacy-asset:manage) para
+  // descargar las imágenes originales de los assets del juego (íconos de huevos y mascotas). Sin clave se
+  // usa la API pública de miniaturas. Las imágenes se guardan en MEDIA_DIR y se sirven en /api/media/.
+  roblox: {
+    apiKey: process.env.ROBLOX_API_KEY || "",
+    universeId: process.env.ROBLOX_UNIVERSE_ID || "10768674210",
+    placeId: process.env.ROBLOX_PLACE_ID || "77372347150746",
+  },
+  mediaDir: process.env.MEDIA_DIR || "/data/media",
   // Lectura automática de vistas (YouTube: páginas públicas + Return YouTube Dislike; resto: yt-dlp). YOUTUBE_API_KEY es opcional.
   views: {
     enabled: process.env.VIEWS_AUTO !== "false",

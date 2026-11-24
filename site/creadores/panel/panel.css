@@ -582,10 +582,30 @@ a.plat:hover { border-color: var(--ink); }
 .form-actions select { max-width: 360px; }
 .details-cell { overflow-wrap: anywhere; min-width: 260px; }
 
-/* Unirse al servidor de Discord */
-.join-card { max-width: 540px; }
-.join-card img { border-radius: 26px; }
+/* Ventana obligatoria: unirse al servidor de Discord y vincular Roblox */
+.gate {
+  position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; padding: 1rem; overflow-y: auto;
+  background: color-mix(in srgb, var(--side) 55%, transparent); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+}
+.gate__card { width: min(560px, 100%); display: grid; justify-items: center; gap: .7rem; text-align: center; padding: 1.6rem 1.5rem 1.3rem; box-shadow: 0 8px 0 var(--ink); animation: pop .25s ease-out; }
+.gate__card > div { display: grid; justify-items: center; gap: .7rem; width: 100%; }
+.gate__card h2 { font-size: 1.8rem; margin: 0; }
+.gate__art { border-radius: 26px; border: 4px solid #fff; box-shadow: 0 0 0 3px var(--ink), 0 6px 0 3px var(--ink); transform: rotate(-3deg); }
+#gate-picker { width: 100%; text-align: left; }
+.gate__who { margin: .2rem 0 0; }
+@keyframes pop { from { transform: scale(.94); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .gate__card { animation: none; } }
+.gate__steps { list-style: none; display: flex; justify-content: center; gap: .3rem; padding: 0; margin: 0 0 .3rem; font-weight: 800; font-size: .86rem; color: var(--text-muted); }
+.gate__steps li { display: inline-flex; align-items: center; gap: .35rem; margin: 0; }
+.gate__steps li + li::before { content: ""; width: 26px; border-top: 3px dashed var(--border); margin-right: .3rem; }
+.gate__steps span { display: inline-grid; place-items: center; width: 1.7rem; height: 1.7rem; border-radius: 50%; border: 2px solid var(--border); background: var(--surface-2); font-family: var(--display); font-weight: 400; }
+.gate__steps .is-done { color: var(--good); }
+.gate__steps .is-done span { background: var(--hierba); border-color: var(--ink); color: #08311A; font-size: 0; }
+.gate__steps .is-done span::after { content: "✓"; font-size: .95rem; }
+.gate__steps .is-current { color: var(--text-primary); }
+.gate__steps .is-current span { background: var(--yolk); border-color: var(--ink); color: var(--yolk-ink); box-shadow: 0 2px 0 var(--ink); }
 .join-steps { text-align: left; margin: .2rem 0; padding: .7rem 1rem .7rem 2.2rem; border-radius: 16px; background: var(--surface-2); border: 2px dashed var(--border); font-weight: 700; }
 .join-steps li { margin: .2rem 0; }
 .join-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: .8rem; margin: .4rem 0; }
-@media (max-width: 480px) { .join-actions .btn { width: 100%; } }
+@media (max-width: 480px) { .join-actions .btn { width: 100%; } .gate__card h2 { font-size: 1.45rem; } }
+#flash { width: 100%; }

@@ -109,7 +109,36 @@ export function getDiscordUser(db, id) {
     id: u.id, username: u.username, globalName: u.global_name,
     avatar: u.avatar && /^[a-f0-9_]+$/i.test(u.avatar) ? `https://cdn.discordapp.com/avatars/${u.id}/${u.avatar}.png?size=128` : null,
     roles: { inGuild: !!u.in_guild, admin: !!u.is_admin, moderator: !!u.is_mod, creator: !!u.is_creator, staffDiscord: u.staff_discord || null },
+    roblox: linkedRoblox(db, u.id, u.roblox_user_id),
   };
+}
+
+// ---------- Cuenta de Roblox del usuario (obligatoria para usar el panel) ----------
+// Una cuenta de Roblox por usuario de Discord y viceversa. Solo cuentas que ya jugaron Sky Eggs.
+// Si es creador aprobado o staff vinculado, la cuenta queda fija (la cambia un moderador).
+export function linkedRoblox(db, discordId, userId) {
+  if (userId === undefined) userId = db.prepare("SELECT roblox_user_id FROM discord_users WHERE id = ?").get(String(discordId))?.roblox_user_id;
+  if (!userId) return null;
+  const p = db.prepare("SELECT name, display_name, level FROM players WHERE user_id = ?").get(userId);
+  const locked = Boolean(db.prepare("SELECT 1 FROM creators WHERE discord_id = ? AND link_status = 'approved'").get(String(discordId))
+    || db.prepare("SELECT 1 FROM staff WHERE discord_id = ? AND link_status = 'approved' AND rank != 'None'").get(String(discordId)));
+  return { userId, name: p?.name || `#${userId}`, displayName: p?.display_name || p?.name || null, level: p?.level ?? null, locked };
+}
+export function linkAccount(db, discordId, robloxUserId, now = Date.now()) {
+  const p = playedPlayer(db, robloxUserId);
+  const cur = linkedRoblox(db, discordId);
+  if (cur && cur.userId === p.user_id) return { ok: true, roblox: cur };
+  if (cur?.locked) throw new Fail("already_linked");
+  const other = db.prepare("SELECT id FROM discord_users WHERE roblox_user_id = ? AND id != ?").get(p.user_id, String(discordId));
+  if (other) throw new Fail("roblox_taken");
+  db.prepare("UPDATE discord_users SET roblox_user_id = ?, roblox_linked_at = ? WHERE id = ?").run(p.user_id, now, String(discordId));
+  return { ok: true, roblox: linkedRoblox(db, discordId) };
+}
+// Un moderador confirmó esta cuenta (creador o staff): pasa a ser la cuenta del usuario aunque otro la hubiera elegido.
+export function syncAccount(db, discordId, robloxUserId, now = Date.now()) {
+  if (!robloxUserId) return;
+  db.prepare("UPDATE discord_users SET roblox_user_id = NULL WHERE roblox_user_id = ? AND id != ?").run(robloxUserId, String(discordId));
+  db.prepare("UPDATE discord_users SET roblox_user_id = ?, roblox_linked_at = ? WHERE id = ?").run(robloxUserId, now, String(discordId));
 }
 const nameOf = (db, id) => {
   const u = db.prepare("SELECT username, global_name FROM discord_users WHERE id = ?").get(String(id));
@@ -128,7 +157,9 @@ export function submitApplication(db, discordId, body, now = Date.now()) {
   if (last && last.status === "approved" && getCreator(db, discordId)?.link_status === "approved") throw new Fail("already_approved");
   if (last && last.status === "rejected" && now - (last.reviewed_at || last.created_at) < 7 * 86400_000) throw new Fail("wait_after_reject");
   if (body?.age13 !== true) throw new Fail("age_required");
-  const player = playedPlayer(db, body?.robloxUserId);
+  // La solicitud usa la cuenta de Roblox vinculada al panel (obligatoria); robloxUserId solo si coincide o no hay.
+  const linked = linkedRoblox(db, discordId);
+  const player = playedPlayer(db, linked ? linked.userId : body?.robloxUserId);
   const email = str(body?.email, 120);
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Fail("bad_email");
   const platforms = cleanPlatforms(body?.platforms);
@@ -478,6 +509,7 @@ function approveLink(db, actor, discordId, userId, name, display, now, isNew = t
       roblox_display = excluded.roblox_display, link_status = 'approved', link_code = NULL,
       link_reviewed_by = excluded.link_reviewed_by, link_reviewed_at = excluded.link_reviewed_at, link_note = NULL
   `).run(String(discordId), userId, name, display, now, actor.name, now);
+  syncAccount(db, discordId, userId, now);
   const keepTier = !isNew && prev?.tier && prev.tier !== "None";
   const tier = keepTier ? tierOf(prev) : "Creator";
   db.prepare("UPDATE creators SET tier = ?, tier_changed_at = ?, warn_week = NULL WHERE discord_id = ?").run(tier, now, String(discordId));
