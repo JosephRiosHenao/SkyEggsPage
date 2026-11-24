@@ -4,51 +4,57 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
-  <title>Mi panel · Creadores de Sky Eggs</title>
+  <title>Panel · Sky Eggs</title>
   <link rel="icon" href="/favicon.ico" sizes="any">
-  <link rel="stylesheet" href="/css/styles.css?v=__ASSET_V__">
-  <link rel="stylesheet" href="/creadores/creadores.css?v=__ASSET_V__">
+  <link rel="stylesheet" href="/creadores/panel/panel.css?v=__ASSET_V__">
 </head>
-<body class="panel">
-  <header class="nav">
-    <a class="nav__logo" href="/creadores/" aria-label="Programa de creadores">
-      <img src="/favicon-32.png" width="32" height="32" alt="">
-      <span>Creadores</span>
-    </a>
-    <div class="who" id="who" hidden>
-      <img id="who-pic" src="/img/icon-192.png" alt="">
-      <span id="who-name"></span>
-      <span class="badges" id="who-badges"></span>
-      <button class="linkbtn" type="button" id="logout">Salir</button>
-    </div>
-  </header>
+<body class="pn">
+  <div class="pn-shell">
+    <!-- Barra lateral -->
+    <aside class="pn-side" id="side" aria-label="Secciones del panel">
+      <a class="pn-brand" href="/">
+        <img src="/favicon-32.png" width="32" height="32" alt="">
+        <span><strong>Sky Eggs</strong><small>Panel</small></span>
+      </a>
+      <nav class="pn-nav" id="nav"></nav>
+      <div class="pn-links">
+        <a href="/creadores/" target="_blank" rel="noopener">Programa de creadores ↗</a>
+        <a href="/staff/" target="_blank" rel="noopener">Programa de staff ↗</a>
+      </div>
+    </aside>
+    <div class="pn-scrim" id="scrim"></div>
 
-  <main class="panel-main" id="contenido">
-    <div id="flash" role="status" aria-live="polite"></div>
+    <div class="pn-main">
+      <header class="pn-top">
+        <button class="pn-burger" type="button" id="burger" aria-label="Abrir menú" aria-controls="side">☰</button>
+        <h1 class="pn-title" id="page-title">Panel</h1>
+        <div class="who" id="who" hidden>
+          <img id="who-pic" src="/img/icon-192.png" alt="">
+          <span class="who__name" id="who-name"></span>
+          <span class="badges" id="who-badges"></span>
+          <button class="linkbtn" type="button" id="logout">Salir</button>
+        </div>
+      </header>
 
-    <!-- Sin sesión -->
-    <section class="box login-card" id="view-login" hidden>
-      <img src="/img/icon-192.png" width="96" height="96" alt="">
-      <h1 class="section-title">Entra con Discord</h1>
-      <p class="muted">Con tu cuenta de Discord vemos tu rol en el servidor de Sky Eggs: aspirante, creador, moderador o admin.</p>
-      <p class="mt"><a class="btn btn--discord btn--lg" id="login-btn" href="/api/auth/discord/login?next=/creadores/panel/">Entrar con Discord</a></p>
-      <p class="small muted mt">Solo leemos tu nombre, tu foto y tus roles en nuestro servidor. Nada más.</p>
-    </section>
+      <main class="pn-content" id="contenido">
+        <div id="flash" role="status" aria-live="polite"></div>
 
-    <!-- Con sesión -->
-    <div id="view-app" hidden>
-      <nav class="tabs" id="tabs" role="tablist" aria-label="Secciones del panel"></nav>
+        <!-- Sin sesión -->
+        <section class="box login-card" id="view-login" hidden>
+          <img src="/img/icon-192.png" width="88" height="88" alt="">
+          <h2>Entra con Discord</h2>
+          <p class="muted">Con tu cuenta de Discord vemos tu rol en el servidor de Sky Eggs: aspirante, creador, staff o admin.</p>
+          <p class="mt"><a class="btn btn--discord btn--lg" id="login-btn" href="/api/auth/discord/login?next=/creadores/panel/">Entrar con Discord</a></p>
+          <p class="small muted mt">Solo leemos tu nombre, tu foto y tus roles en nuestro servidor.</p>
+        </section>
 
-      <section data-tab="inicio" hidden></section>
-      <section data-tab="aplicar" hidden></section>
-      <section data-tab="metas" hidden></section>
-      <section data-tab="evidencias" hidden></section>
-      <section data-tab="roblox" hidden></section>
-      <section data-tab="bonos" hidden></section>
-      <section data-tab="comandos" hidden></section>
-      <section data-tab="moderacion" hidden></section>
+        <!-- Con sesión -->
+        <div id="view-app" hidden>
+          <div id="view"></div>
+        </div>
 
-      <section data-tab="guia" class="guide" hidden>
+        <!-- Guías (se copian a la sección "Guía") -->
+        <template id="guide-tpl">
         <div class="box">
           <h2>Guía para creadores</h2>
           <ol>
@@ -94,9 +100,10 @@
             <li><strong>Métricas, códigos y regalos</strong> siguen en <a href="/admin/">el panel de métricas</a>.</li>
           </ol>
         </div>
-      </section>
+        </template>
+      </main>
     </div>
-  </main>
+  </div>
   <script src="/creadores/panel/panel.js?v=__ASSET_V__" defer></script>
 </body>
 </html>

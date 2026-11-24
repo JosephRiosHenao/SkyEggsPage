@@ -59,6 +59,7 @@ export function upsertDiscordUser(db, user, roles, now = Date.now()) {
       last_login = excluded.last_login
   `).run(String(user.id), str(user.username, 40) || "discord", str(user.global_name, 40) || null, user.avatar || null,
     roles.inGuild ? 1 : 0, roles.admin ? 1 : 0, roles.moderator ? 1 : 0, roles.creator ? 1 : 0, now, now);
+  db.prepare("UPDATE discord_users SET staff_discord = ? WHERE id = ?").run(roles.staffDiscord || null, String(user.id));
 }
 export function getDiscordUser(db, id) {
   const u = db.prepare("SELECT * FROM discord_users WHERE id = ?").get(String(id));
@@ -66,7 +67,7 @@ export function getDiscordUser(db, id) {
   return {
     id: u.id, username: u.username, globalName: u.global_name,
     avatar: u.avatar && /^[a-f0-9_]+$/i.test(u.avatar) ? `https://cdn.discordapp.com/avatars/${u.id}/${u.avatar}.png?size=128` : null,
-    roles: { inGuild: !!u.in_guild, admin: !!u.is_admin, moderator: !!u.is_mod, creator: !!u.is_creator },
+    roles: { inGuild: !!u.in_guild, admin: !!u.is_admin, moderator: !!u.is_mod, creator: !!u.is_creator, staffDiscord: u.staff_discord || null },
   };
 }
 const nameOf = (db, id) => {

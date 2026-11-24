@@ -52,6 +52,20 @@
     not_trackable: "Esta red no deja leer las vistas solas. Escribe las vistas fijas.",
     no_auto_views: "Todavía no se pudieron leer las vistas. Toca “Volver a leer” o escribe las vistas fijas.",
     views_off: "La lectura automática de vistas está apagada en el servidor.",
+    already_staff: "Ya eres parte del staff.",
+    missing_answer: "Responde todas las preguntas obligatorias (*).",
+    answer_short: "Desarrolla un poco más tus respuestas largas (mínimo 10 letras).",
+    not_staff: "Esta sección es para el staff.",
+    link_deadline: "Ya pasó la fecha límite para vincular: envía una solicitud de Helper.",
+    bad_task: "Elige una tarea válida.",
+    bad_amount: "Escribe una cantidad entre 1 y 500.",
+    need_proof: "Pon un enlace o sube una captura como prueba.",
+    note_short: "Explica qué hiciste.",
+    note_required: "Escribe una nota.",
+    max_rank: "Ya estás en el rango más alto.",
+    bad_rank: "Ese rango no existe.",
+    same_rank: "Ya tiene ese rango.",
+    members_intent: "No se pudo leer la lista de Discord: activa «Server Members Intent» en el bot.",
     bad_tier: "Ese rango no existe.",
     same_tier: "Ya tiene ese rango.",
     must_reapply: "Saliste del programa: envía una solicitud nueva en la pestaña Aplicar.",
@@ -124,49 +138,88 @@
   }
 
   // ---------- Estado ----------
-  let me = null;          // { user, application }
-  let program = null;     // niveles y packs
+  let me = null;          // { user, application, staffApplication }
+  let program = null;     // niveles y packs de creadores
+  let staffProgram = null;// rangos, tareas y formulario del staff
   let creator = null;     // estado del creador
-  let queue = null;       // cola de moderación
+  let queue = null;       // cola de moderación (con conteos del staff)
   let current = null;
 
   const roles = () => me?.user?.roles || {};
   const isCreator = () => roles().creator || roles().admin;
   const isMod = () => roles().moderator || roles().admin;
+  const isModJr = () => roles().modjr || isMod();
+  const isAdmin = () => !!roles().admin;
+  const staffRank = () => roles().staffRank || null;
 
-  function tabList() {
-    const t = [["inicio", "Inicio"]];
-    // También quien salió del programa (2 semanas sin video o lo sacó un moderador) vuelve a ver "Aplicar".
-    if ((!isCreator() && !isMod()) || me?.application?.status === "removed") t.push(["aplicar", "Aplicar"]);
-    if (isCreator()) t.push(["metas", "Metas"], ["evidencias", "Evidencias"], ["roblox", "Mi Roblox"], ["bonos", "Bonos"]);
-    t.push(["comandos", "Comandos"]);
-    if (isMod()) t.push(["moderacion", "Moderación"]);
-    t.push(["guia", "Guía"]);
-    return t;
+  // Barra lateral: grupos según el rol. [clave, título, icono, conteo]
+  function navGroups() {
+    const q = queue || {};
+    const st = q.staff || {};
+    const len = (a) => (Array.isArray(a) ? a.length : 0);
+    const canApplyCreator = (!isCreator() && !isMod()) || me?.application?.status === "removed";
+    const canApplyStaff = !staffRank() && !isAdmin();
+    return [
+      { title: "General", items: [["inicio", "Inicio", "🏠"], ["guia", "Guía", "📘"]] },
+      { title: "Creador", show: isCreator(), items: [["metas", "Mis metas", "🎯"], ["evidencias", "Evidencias", "🎬"], ["roblox", "Mi Roblox", "🔗"], ["bonos", "Bonos", "💰"], ["comandos", "Comandos de creador", "⌨️"]] },
+      { title: "Únete", show: canApplyCreator || canApplyStaff, items: [canApplyCreator && ["aplicar", "Ser creador", "🎥"], canApplyStaff && ["staff-aplicar", "Ser Helper (staff)", "🛟"]] },
+      { title: "Mi staff", show: Boolean(staffRank()), items: [
+        !roles().staffLinked && ["staff-vincular", "Vincular mi cuenta", "🔗"],
+        roles().staffLinked && ["staff-tareas", "Mis tareas del mes", "✅"],
+        ["staff-guia", "Comandos y funciones", "🛡️"]] },
+      { title: "Moderación de creadores", show: isMod(), items: [
+        ["mod-solicitudes", "Solicitudes", "📝", len(q.applications)], ["mod-vinculos", "Vinculaciones", "🔗", len(q.links)],
+        ["mod-evidencias", "Evidencias", "🎬", len(q.evidences)], ["mod-bonos", "Bonos Robux", "💰", len(q.bonuses)],
+        isAdmin() && ["mod-especiales", "Pedidos especiales", "👑", len(q.specials)],
+        ["mod-creadores", "Creadores y métricas", "📊"], ["mod-avisos", "Avisos al buzón", "📬"], ["mod-antiguos", "Creadores antiguos", "⏳"]] },
+      { title: "Staff", show: isModJr(), items: [
+        ["staff-reportes", "Reportes del juego", "📣", st.reports], ["staff-revision", "Tareas por revisar", "🧾", st.evidence],
+        ["staff-equipo", "Equipo y métricas", "📈"],
+        isMod() && ["staff-solicitudes", "Solicitudes de Helper", "🛟", (st.applications || 0) + (st.links || 0)],
+        isMod() && ["staff-ascensos", "Ascensos", "⬆️", st.promotions], isMod() && ["staff-antiguos", "Staff antiguo", "⏳"],
+        !staffRank() && ["staff-guia", "Guía del staff", "🛡️"]] },
+      { title: "Administración", show: isMod(), items: [isAdmin() && ["admin-suerte", "Prueba tu suerte", "🥚"], ["admin-discord", "Bot de Discord", "🤖"], ["mod-registro", "Registro", "🗂️"]] },
+    ].filter((g) => g.show !== false).map((g) => ({ ...g, items: g.items.filter(Boolean) })).filter((g) => g.items.length);
   }
+  const allowedKeys = () => navGroups().flatMap((g) => g.items.map((i) => i[0]));
+  const titleOf = (key) => navGroups().flatMap((g) => g.items).find((i) => i[0] === key)?.[1] || "Panel";
 
-  function renderTabs() {
-    const pending = queue ? queue.applications.length + queue.links.length + queue.evidences.length + queue.bonuses.length + queue.specials.length : 0;
-    $("tabs").replaceChildren(...tabList().map(([key, label]) => el("button", {
-      class: "tab", role: "tab", type: "button", "aria-selected": String(key === current), "aria-controls": `tab-${key}`,
-      onclick: () => { location.hash = key; },
-    }, label, key === "moderacion" && pending ? el("span", { class: "count" }, String(pending)) : null)));
+  function renderNav() {
+    $("nav").replaceChildren(...navGroups().map((g) => el("div", { class: "nav-group" },
+      el("p", { class: "nav-group__title" }, g.title),
+      ...g.items.map(([key, label, icon, count]) => el("a", {
+        class: `nav-item${key === current ? " is-active" : ""}`, href: `#${key}`, "aria-current": key === current ? "page" : null,
+        onclick: () => document.body.classList.remove("nav-open"),
+      }, el("span", { class: "nav-item__icon", "aria-hidden": "true" }, icon), el("span", { class: "nav-item__label" }, label),
+        count ? el("span", { class: "count" }, String(count)) : null)))));
   }
+  const loadQueue = async () => { if (isModJr()) { queue = await api("/api/mod/queue"); renderNav(); } return queue; };
 
   async function show(key) {
-    const allowed = tabList().map((t) => t[0]);
-    if (!allowed.includes(key)) key = allowed.includes("metas") ? "metas" : "inicio";
+    const allowed = allowedKeys();
+    // Enlaces viejos (#moderacion) → primera página de moderación.
+    if (key === "moderacion") key = "mod-solicitudes";
+    if (!allowed.includes(key)) key = allowed.includes("metas") ? "metas" : allowed.includes("staff-tareas") ? "staff-tareas" : "inicio";
     current = key;
-    for (const s of document.querySelectorAll("[data-tab]")) { s.hidden = s.dataset.tab !== key; s.id = `tab-${s.dataset.tab}`; }
-    renderTabs();
-    const section = document.querySelector(`[data-tab="${key}"]`);
+    renderNav();
+    $("page-title").textContent = titleOf(key);
+    const section = $("view");
+    section.replaceChildren(el("div", { class: "skeleton" }));
     try {
       if (RENDER[key]) await RENDER[key](section);
     } catch (e) {
       if (e.status === 401) return start();
       section.replaceChildren(el("div", { class: "notice notice--bad" }, errText(e)));
     }
+    window.scrollTo({ top: 0 });
   }
+  // Página de moderación: tarjeta con título y la vista dentro.
+  const modPage = (fn, desc) => async (s) => {
+    await loadQueue();
+    const body = el("div");
+    s.replaceChildren(el("div", { class: "box" }, desc ? el("p", { class: "small muted" }, desc) : null, body));
+    await fn(body);
+  };
 
   // ---------- Secciones ----------
   const RENDER = {
@@ -426,34 +479,34 @@
       s.replaceChildren(box);
     },
 
-    async moderacion(s) {
-      queue = await api("/api/mod/queue");
-      renderTabs();
-      const admin = queue.actor.role === "admin";
-      const sub = el("nav", { class: "tabs" });
-      const body = el("div");
-      const views = [
-        ["solicitudes", `Solicitudes (${queue.applications.length})`, () => modApplications(body)],
-        ["vinculos", `Vinculaciones (${queue.links.length})`, () => modLinks(body)],
-        ["evidencias", `Evidencias (${queue.evidences.length})`, () => modEvidences(body)],
-        ["bonos", `Bonos Robux (${queue.bonuses.length})`, () => modBonuses(body, admin)],
-        ...(admin ? [["especiales", `Pedidos especiales (${queue.specials.length})`, () => modSpecials(body)]] : []),
-        ["creadores", "Creadores y métricas", () => modCreators(body)],
-        ["avisos", "Avisos", () => modNotices(body)],
-        ["antiguos", "Creadores antiguos", () => modLegacy(body)],
-        ["registro", "Registro", () => modAudit(body)],
-      ];
-      let active = sessionStorage.getItem("se_modtab") || "solicitudes";
-      if (!views.some((v) => v[0] === active)) active = "solicitudes";
-      const paint = () => {
-        sub.replaceChildren(...views.map(([k, label, fn]) => el("button", { class: "tab", type: "button", "aria-selected": String(k === active), onclick: () => { active = k; try { sessionStorage.setItem("se_modtab", k); } catch { /* sin almacenamiento */ } paint(); } }, label)));
-        const v = views.find((x) => x[0] === active);
-        Promise.resolve(v[2]()).catch((e) => body.replaceChildren(el("div", { class: "notice notice--bad" }, errText(e))));
-      };
-      paint();
-      s.replaceChildren(el("div", { class: "box" }, el("h2", {}, admin ? "Moderación (admin)" : "Moderación"),
-        el("p", { class: "small muted" }, `Actúas como ${queue.actor.name}. Todo lo que hagas queda en el Registro.`), sub, body));
+    guia(s) {
+      const boxes = [...$("guide-tpl").content.querySelectorAll(":scope > .box")];
+      s.replaceChildren(...boxes.filter((b) => !b.dataset.role || (b.dataset.role === "admin" ? isAdmin() : isMod())).map((b) => b.cloneNode(true)));
     },
+
+    "mod-solicitudes": modPage((b) => modApplications(b), "Solicitudes para entrar al programa de creadores."),
+    "mod-vinculos": modPage((b) => modLinks(b), "Cambios de cuenta de Roblox que pidieron los creadores."),
+    "mod-evidencias": modPage((b) => modEvidences(b), "Videos y directos por revisar, y recuentos de vistas."),
+    "mod-bonos": modPage((b) => modBonuses(b, isAdmin()), "Bonos de Robux por video (moderador y luego admin)."),
+    "mod-especiales": modPage((b) => modSpecials(b), "Pedidos especiales de creadores con 100.000 vistas al mes."),
+    "mod-creadores": modPage((b) => modCreators(b)),
+    "mod-avisos": modPage((b) => modNotices(b)),
+    "mod-antiguos": modPage((b) => modLegacy(b)),
+    "mod-registro": modPage((b) => modAudit(b), "Todo lo que hace el staff en esta página, con nombre y hora."),
+
+    // ---------- Staff ----------
+    "staff-aplicar": async (s) => staffApply(s),
+    "staff-vincular": async (s) => staffLink(s),
+    "staff-tareas": async (s) => staffTasks(s),
+    "staff-guia": async (s) => staffGuide(s),
+    "staff-reportes": modPage((b) => staffReports(b), "Reportes enviados desde el juego con ;Report. Resuélvelos con una nota de lo que hiciste."),
+    "staff-revision": modPage((b) => staffReview(b), "Evidencias de tareas del staff de rango inferior al tuyo."),
+    "staff-equipo": modPage((b) => staffTeam(b)),
+    "staff-solicitudes": modPage((b) => staffApplications(b), "Solicitudes para ser Helper y cuentas de staff antiguo por confirmar."),
+    "staff-ascensos": modPage((b) => staffPromotions(b), "Ascenso a Moderator Jr: lo aprueba un Moderator o el Admin. A Moderator: solo el Admin."),
+    "staff-antiguos": modPage((b) => staffLegacy(b)),
+    "admin-suerte": async (s) => adminLuck(s),
+    "admin-discord": modPage((b) => adminDiscord(b), "Comprueba paso a paso que el bot pueda poner y quitar roles."),
   };
 
   // Buscador de cuenta: solo jugadores que ya entraron a Sky Eggs (como el del huevo de la página).
@@ -504,7 +557,7 @@
   const robloxLine = (id, name, display, player) => el("p", { class: "item__meta" }, "Roblox: ",
     link(`https://www.roblox.com/users/${id}/profile`, `@${name}${display && display !== name ? ` (${display})` : ""}`),
     ` · id ${id}`, player ? ` · juega desde ${day2(player.firstSeen)} · nivel ${player.level ?? "?"} · última vez ${day2(player.lastSeen)}` : "");
-  const refreshMod = () => show("moderacion");
+  const refreshMod = () => show(current);
   const noteInput = (ph = "Nota (se guarda en el registro)") => el("input", { class: "wide", placeholder: ph, maxlength: "500" });
   const btn = (text, cls, fn) => el("button", { class: `btn btn--mini ${cls}`, type: "button", onclick: (e) => fn(e.currentTarget) }, text);
   const empty = (t) => el("p", { class: "empty" }, t);
@@ -808,6 +861,336 @@
       : empty("El registro está vacío."));
   }
 
+  // ======================================================================
+  // ---------- Programa de staff ----------
+  // ======================================================================
+  const RANK_NAME = { Helper: "Helper", ModeratorJr: "Moderator Jr", Moderator: "Moderator", None: "Fuera del staff" };
+  const rankPill = (r) => el("span", { class: `pill pill--rank pill--${r || "None"}` }, RANK_NAME[r] || r || "—");
+  const hours = (v) => `${String(v ?? 0).replace(".", ",")} h`;
+
+  async function staffApply(s) {
+    const st = await api("/api/staff/me");
+    const a = st.application;
+    const box = el("div", { class: "box" }, el("h2", {}, "Aplica para ser Helper"),
+      el("p", { class: "muted" }, "Helper es la entrada al staff de Sky Eggs. Ayudas a los jugadores en el juego y en Discord, tienes comandos propios y puedes ascender a Moderator Jr y Moderator. Mira todo el programa en "),
+      el("p", {}, el("a", { href: "/staff/", target: "_blank", rel: "noopener" }, "skyeggs.pro/staff →")));
+    if (st.staff && st.staff.rank !== "None" && st.staff.linkStatus === "approved") return s.replaceChildren(el("div", { class: "notice" }, `Ya eres ${RANK_NAME[st.staff.rank]}.`));
+    if (a && (a.status === "pending" || a.status === "contacted")) {
+      box.append(el("p", {}, "Estado de tu solicitud: ", pill(a.status, a.status === "contacted" ? "Te contactamos: revisa Discord" : "En revisión")));
+      return s.replaceChildren(box);
+    }
+    if (a?.status === "rejected") box.append(el("div", { class: "notice notice--bad" }, `Tu última solicitud fue rechazada${a.review_note ? `: ${a.review_note}` : "."} Puedes volver a aplicar 14 días después.`));
+    let account = null;
+    const accountBox = el("div");
+    const paintAccount = () => accountBox.replaceChildren(account
+      ? el("div", { class: "form" }, el("label", {}, "Tu cuenta de Roblox"), accountChip(account, () => { account = null; paintAccount(); }))
+      : accountPicker((p) => { account = p; paintAccount(); }));
+    paintAccount();
+    const fields = staffProgram.questions.map((q) => {
+      const name = `q_${q.key}`;
+      const label = `${q.label}${q.required ? " *" : ""}`;
+      if (q.type === "yesno") return el("fieldset", { class: "yesno" }, el("legend", {}, label),
+        el("label", { class: "check" }, el("input", { type: "radio", name, value: "si", required: q.required }), "Sí"),
+        el("label", { class: "check" }, el("input", { type: "radio", name, value: "no" }), "No"));
+      return el("label", {}, label, q.type === "long"
+        ? el("textarea", { name, required: q.required, maxlength: "1200", rows: "3" })
+        : el("input", { name, required: q.required, maxlength: "200" }));
+    });
+    const form = el("form", { class: "form form--staff" },
+      el("div", { class: "notice" }, "Tu usuario de Discord es con el que entraste. Elige abajo tu cuenta de Roblox: así quedan vinculadas las dos."),
+      accountBox, ...fields,
+      el("label", { class: "check" }, el("input", { name: "age13", type: "checkbox", required: true }), "Tengo 13 años o más y acepto las normas del staff"),
+      el("div", { class: "form-actions" }, el("button", { class: "btn btn--yolk", type: "submit" }, "Enviar solicitud")));
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      if (!account) return flash(ERRORS.pick_account, "bad");
+      const f = new FormData(form);
+      const answers = Object.fromEntries(staffProgram.questions.map((q) => [q.key, f.get(`q_${q.key}`) || ""]));
+      act(e.submitter, () => api("/api/staff/apply", { robloxUserId: account.userId, answers, age13: f.get("age13") === "on" }),
+        "¡Solicitud enviada! Un Moderator la revisará y te escribirá por Discord.", () => show("staff-aplicar"));
+    });
+    box.append(form);
+    s.replaceChildren(box);
+  }
+
+  async function staffLink(s) {
+    const st = await api("/api/staff/me");
+    const dl = new Date(st.linkDeadline).toLocaleDateString("es-CO", { dateStyle: "long" });
+    const box = el("div", { class: "box" }, el("h2", {}, `Vincula tu cuenta de ${RANK_NAME[st.discordRank] || "staff"}`),
+      el("p", {}, `Ya eres parte del staff, así que no tienes que llenar el formulario. Solo vincula tu Roblox antes del ${dl}. Si no lo haces, pierdes el rango en el juego y en Discord y tendrás que volver a aplicar.`));
+    if (st.staff?.linkStatus === "pending") {
+      box.append(el("div", { class: "notice" }, "En revisión: un Moderator confirmará que esta es tu cuenta."), accountChip({ ...st.staff.roblox, displayName: st.staff.roblox?.name, avatar: null }));
+      return s.replaceChildren(box);
+    }
+    box.append(el("p", { class: "small muted" }, "Si el juego ya te vio con tu etiqueta de staff en esa cuenta, se confirma al instante."),
+      accountPicker((p) => {
+        if (!confirm(`¿Vincular @${p.name}?`)) return;
+        act(document.activeElement, () => api("/api/staff/link", { userId: p.userId }),
+          (o) => (o.auto ? `¡Listo! Cuenta confirmada como ${RANK_NAME[o.rank]}.` : "Enviado: un Moderator confirmará tu cuenta."), async () => { me = await api("/api/me"); renderNav(); show(roles().staffLinked ? "staff-tareas" : "staff-vincular"); });
+      }, "Busca tu cuenta de Roblox"));
+    s.replaceChildren(box);
+  }
+
+  function progressBlock(p, title) {
+    const box = el("div", { class: "box" }, el("div", { class: "item__head" }, el("h2", {}, title),
+      el("span", { class: `pill ${p.complete ? "pill--approved" : "pill--pending"}` }, p.complete ? "Mes cumplido" : `${p.done}/${p.required} tareas · ${p.percent}%`)));
+    const grid = el("div", { class: "task-grid" });
+    for (const t of p.tasks) {
+      const pct = Math.min(100, (t.value / t.target) * 100);
+      const bar = el("div", { class: "meter" }, el("div", { class: "meter__fill", "data-w": pct }));
+      grid.append(el("div", { class: `task${t.done ? " is-done" : ""}${t.optional ? " is-optional" : ""}` },
+        el("div", { class: "task__head" }, el("strong", {}, t.name), el("span", { class: "task__val" }, `${String(t.value).replace(".", ",")} / ${t.target} ${t.unit}`)),
+        bar,
+        el("p", { class: "small muted" }, `${t.track === "auto" ? "Se mide solo" : "Con evidencias"}${t.optional ? " · extra (no obligatoria)" : ""}${t.pending ? ` · ${t.pending} en revisión` : ""}`)));
+    }
+    box.append(grid);
+    requestAnimationFrame(() => { for (const f of box.querySelectorAll(".meter__fill")) f.style.width = `${f.dataset.w}%`; });
+    return box;
+  }
+
+  async function staffTasks(s) {
+    const st = await api("/api/staff/me");
+    if (!st.current) return s.replaceChildren(el("div", { class: "notice" }, "Todavía no tienes un rango de staff activo."));
+    const rank = st.staff.rank;
+    const evTasks = staffProgram.tasks.filter((t) => t.track === "evidence" && (t.targets[rank] || 0) > 0);
+    const head = el("div", { class: "box hero-card" },
+      el("div", {}, el("p", { class: "small muted" }, "Tu rango"), el("h2", {}, `${staffProgram.ranks.find((r) => r.key === rank)?.emoji || ""} ${RANK_NAME[rank]}`),
+        el("p", { class: "small muted" }, `En el staff desde ${new Date(st.staff.joinedAt).toLocaleDateString("es-CO", { dateStyle: "medium" })}${st.staff.roblox ? ` · Roblox @${st.staff.roblox.name}` : ""}`)),
+      el("div", { class: "hero-card__stats" },
+        tile(String(st.current.activity.actions), "comandos este mes"), tile(String(st.current.activity.reportsFiled), "reportes enviados"),
+        tile(String(st.staff.strikes), "meses sin cumplir", st.staff.strikes ? "warn" : null)));
+    const warn = st.staff.strikes ? el("div", { class: "notice notice--bad" }, `Tienes ${st.staff.strikes} mes sin cumplir tus tareas. Con ${staffProgram.failMonthsToRemove} seguidos sales del staff.`) : null;
+    const form = el("form", { class: "form" },
+      el("div", { class: "row" },
+        el("label", {}, "Tarea", el("select", { name: "task" }, ...evTasks.map((t) => el("option", { value: t.key }, t.name)))),
+        el("label", {}, "¿Cuánto suma?", el("input", { name: "amount", type: "number", min: "1", max: "500", value: "1", required: true })),
+        el("label", {}, "Mes", el("select", { name: "month" }, el("option", { value: "current" }, "Este mes"), el("option", { value: "previous" }, "Mes pasado (hasta el día 3)")))),
+      el("label", {}, "Enlace a la prueba (mensaje de Discord, video…) — opcional si subes captura", el("input", { name: "url", type: "url", placeholder: "https://…" })),
+      el("label", {}, "Captura", el("input", { name: "file", type: "file", accept: "image/png,image/jpeg,image/webp" })),
+      el("label", {}, "¿Qué hiciste?", el("textarea", { name: "note", required: true, maxlength: "600", rows: "2" })),
+      el("div", { class: "form-actions" }, el("button", { class: "btn btn--yolk", type: "submit" }, "Subir evidencia")));
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const f = new FormData(form);
+      act(e.submitter, async () => {
+        let file = null;
+        const img = f.get("file");
+        if (img && img.size) file = (await api("/api/creators/upload", {}, img)).file;
+        return api("/api/staff/evidence", { task: f.get("task"), amount: Number(f.get("amount")), month: f.get("month"), url: f.get("url"), note: f.get("note"), file });
+      }, "Evidencia enviada. Un rango superior la revisará.", () => show("staff-tareas"));
+    });
+    const TASK_NAME = Object.fromEntries(staffProgram.tasks.map((t) => [t.key, t.name]));
+    const evList = st.evidences.length ? el("table", { class: "tbl" }, el("thead", {}, el("tr", {}, ...["Fecha", "Tarea", "Pide", "Suma", "Estado", "Nota"].map((h) => el("th", {}, h)))),
+      el("tbody", {}, ...st.evidences.map((e) => el("tr", {}, el("td", {}, when(e.createdAt)), el("td", {}, TASK_NAME[e.task] || e.task), el("td", {}, String(e.amount)),
+        el("td", {}, e.approved == null ? "—" : String(e.approved)), el("td", {}, pill(e.status, { pending: "En revisión", approved: "Aprobada", rejected: "Rechazada" }[e.status])), el("td", { class: "small" }, e.reviewNote || "")))))
+      : empty("Aún no subiste evidencias.");
+    const next = staffProgram.path[staffProgram.path.indexOf(rank) + 1];
+    const promo = el("div", { class: "box" }, el("h2", {}, "Ascenso"));
+    const pending = st.promotions.find((p) => p.status === "pending");
+    if (!next) promo.append(el("p", { class: "muted" }, "Estás en el rango más alto del staff."));
+    else if (pending) promo.append(el("p", {}, `Pediste subir a ${RANK_NAME[pending.toRank]}: `, pill("pending", "en revisión")));
+    else {
+      const reason = el("textarea", { maxlength: "600", rows: "2", placeholder: "Cuenta por qué estás listo (tareas cumplidas, ayudas, eventos…)" });
+      promo.append(el("p", { class: "muted" }, `Siguiente rango: ${RANK_NAME[next]} (${staffProgram.promotions[next]}).`), reason,
+        el("div", { class: "form-actions" }, btn("Pedir ascenso", "btn--green", (b) => act(b, () => api("/api/staff/promotion", { reason: reason.value }), "Ascenso pedido.", () => show("staff-tareas")))));
+    }
+    s.replaceChildren(...[head, warn, progressBlock(st.current, `Tareas de ${st.current.month}`),
+      el("div", { class: "box" }, el("h2", {}, "Subir evidencia"), el("p", { class: "small muted" }, "Las horas, días y acciones de moderación se miden solas desde el juego (usa ;Duty cuando ayudes). Para el resto sube capturas."), form),
+      el("div", { class: "box" }, el("h2", {}, "Mis evidencias"), evList), promo,
+      st.previous.tasks.length ? progressBlock(st.previous, `Mes pasado (${st.previous.month})`) : null].filter(Boolean));
+  }
+
+  function staffGuide(s) {
+    const p = staffProgram;
+    s.replaceChildren(
+      el("div", { class: "box" }, el("h2", {}, "Normas del staff"), el("ul", { class: "list-plain" }, ...p.rules.map((r) => el("li", {}, r)))),
+      ...p.ranks.map((r) => el("div", { class: "box rank-card", "data-rank": r.key },
+        el("h2", {}, `${r.emoji} ${r.name}`), el("p", { class: "muted" }, r.summary),
+        el("h3", {}, "En el juego"), el("dl", { class: "cmds" }, ...r.game.flatMap((c) => [el("dt", {}, c.cmd), el("dd", {}, c.desc)])),
+        el("h3", {}, "En Discord"), el("ul", { class: "list-plain" }, ...r.discord.map((d) => el("li", {}, d))),
+        el("h3", {}, "Beneficios"), el("ul", { class: "list-plain" }, ...r.benefits.map((d) => el("li", {}, d))),
+        el("h3", {}, "Tareas del mes"), el("ul", { class: "list-plain" }, ...p.tasks.filter((t) => (t.targets[r.key] || 0) > 0).map((t) => el("li", {}, `${t.name}: ${t.targets[r.key]} ${t.unit}${t.optional ? " (extra)" : ""} — ${t.desc}`))))));
+  }
+
+  async function staffReports(body) {
+    const sel = el("select", {}, ...[["open", "Abiertos"], ["resolved", "Resueltos"], ["dismissed", "Descartados"], ["all", "Todos"]].map(([v, l]) => el("option", { value: v }, l)));
+    const list = el("div");
+    const paint = async () => {
+      const { reports } = await api(`/api/mod/reports?status=${sel.value}`);
+      list.replaceChildren(reports.length ? el("div", { class: "list" }, ...reports.map((r) => {
+        const note = noteInput("Qué hiciste (obligatorio)");
+        return el("article", { class: "item" },
+          el("div", { class: "item__head" }, el("span", { class: "item__title" }, `📣 ${r.target_name}`), pill(r.status === "open" ? "pending" : r.status === "resolved" ? "approved" : "rejected", { open: "Abierto", resolved: "Resuelto", dismissed: "Descartado" }[r.status])),
+          el("p", { class: "item__meta" }, "Reportado: ", link(`https://www.roblox.com/users/${r.target_id}/profile`, `@${r.target_name}`), ` · por @${r.reporter_name} · ${when(r.created_at)}${r.online ? " · estaba en el servidor" : ""}${r.previous ? ` · ⚠️ ${r.previous} reporte(s) antes` : ""}`),
+          el("p", {}, r.reason),
+          r.note ? el("p", { class: "item__meta" }, `${r.resolved_by}: ${r.note}`) : null,
+          r.status === "open" ? el("div", { class: "item__actions" }, note,
+            btn("Resuelto", "btn--green", (b) => act(b, () => api("/api/mod/report", { id: r.id, action: "resolve", note: note.value }), "Reporte resuelto.", paint)),
+            btn("Descartar", "btn--white", (b) => act(b, () => api("/api/mod/report", { id: r.id, action: "dismiss", note: note.value }), "Reporte descartado.", paint))) : null);
+      })) : empty("No hay reportes en esta lista."));
+      loadQueue().catch(() => {});
+    };
+    sel.addEventListener("change", paint);
+    body.replaceChildren(el("div", { class: "form-actions" }, el("label", {}, "Mostrar ", sel)), list);
+    await paint();
+  }
+
+  async function staffReview(body) {
+    const { evidences } = await api("/api/mod/staff/evidence");
+    const TASK = Object.fromEntries(staffProgram.tasks.map((t) => [t.key, t]));
+    body.replaceChildren(evidences.length ? el("div", { class: "list" }, ...evidences.map((e) => {
+      const amount = el("input", { type: "number", min: "0", max: "500", value: String(e.amount), class: "num" });
+      const note = noteInput();
+      return el("article", { class: "item" },
+        el("div", { class: "item__head" }, el("span", { class: "item__title" }, `${TASK[e.task]?.name || e.task} · ${userLine(e.user)}`), rankPill(e.rank)),
+        el("p", { class: "item__meta" }, `Pide sumar ${e.amount} ${TASK[e.task]?.unit || ""} al mes ${e.month} · ${when(e.created_at)}${e.url ? " · " : ""}`, e.url ? link(e.url, "abrir enlace") : ""),
+        el("p", {}, e.note),
+        e.file ? el("a", { href: `/api/files/${e.file}`, target: "_blank", rel: "noopener" }, el("img", { class: "proof", src: `/api/files/${e.file}`, alt: "Captura" })) : null,
+        el("div", { class: "item__actions" }, el("label", { class: "small" }, "Suma ", amount), note,
+          btn("Aprobar", "btn--green", (b) => act(b, () => api("/api/mod/staff/evidence", { id: e.id, action: "approve", amount: Number(amount.value), note: note.value }), "Evidencia aprobada.", refreshMod)),
+          btn("Rechazar", "btn--red", (b) => { if (!note.value.trim()) return flash("Escribe el motivo en la nota.", "bad"); act(b, () => api("/api/mod/staff/evidence", { id: e.id, action: "reject", note: note.value }), "Evidencia rechazada.", refreshMod); })));
+    })) : empty("No hay evidencias del staff por revisar."));
+  }
+
+  // Barras dobles por hora: jugadores conectados (promedio) y minutos de staff conectado.
+  function coverageChart(cov) {
+    const maxP = Math.max(1, ...cov.players), maxS = Math.max(1, ...cov.staffMinutes);
+    const row = el("div", { class: "cov", role: "img", "aria-label": "Jugadores y staff por hora del día" });
+    for (let h = 0; h < 24; h++) {
+      const p = el("div", { class: "cov__p", "data-h": (cov.players[h] / maxP) * 100, title: `${h}:00 · ${cov.players[h]} jugadores (promedio)` });
+      const st = el("div", { class: "cov__s", "data-h": (cov.staffMinutes[h] / maxS) * 100, title: `${h}:00 · ${cov.staffMinutes[h]} min de staff por día` });
+      row.append(el("div", { class: "cov__col" }, el("div", { class: "cov__bars" }, p, st), el("span", { class: "cov__lbl" }, h % 3 === 0 ? `${h}h` : "")));
+    }
+    requestAnimationFrame(() => { for (const b of row.querySelectorAll("[data-h]")) b.style.height = `${Math.max(2, b.dataset.h)}%`; });
+    return el("figure", { class: "bars" }, el("figcaption", { class: "small muted" }, "Cobertura por hora (últimos 14 días, hora de Colombia)"),
+      el("div", { class: "legend" }, el("span", { class: "legend__p" }, "Jugadores conectados"), el("span", { class: "legend__s" }, "Minutos de staff")), row,
+      el("p", { class: "small muted" }, "Las horas con muchos jugadores y poco staff son las que conviene cubrir con nuevos Helpers."));
+  }
+
+  async function staffTeam(body) {
+    const d = await api("/api/mod/staff");
+    const s = d.summary;
+    const tiles = el("div", { class: "tiles" },
+      tile(String(s.total), "miembros del staff"), tile(String(s.online), "conectados ahora", s.online ? "good" : null),
+      tile(`${String(s.hoursWeek).replace(".", ",")} h`, "jugadas en 7 días"), tile(`${s.complete}/${s.total}`, `cumplieron ${d.month}`),
+      tile(String(s.atRisk), "por debajo del 50 %", s.atRisk ? "warn" : null), tile(String(s.reportsOpen), "reportes abiertos", s.reportsOpen ? "warn" : null),
+      tile(s.reportAvgHours == null ? "—" : `${String(s.reportAvgHours).replace(".", ",")} h`, "respuesta media a reportes"),
+      tile(String(s.legacyPending), "staff antiguo sin vincular", s.legacyPending ? "warn" : null));
+    const ranks = el("div", { class: "tiers" }, ...staffProgram.ranks.map((r) => { const c = el("span", { class: "tierchip" }, `${r.emoji} ${r.name}: ${s.byRank[r.key] || 0}`); c.style.setProperty("--tier", r.color); return c; }));
+    const isA = isAdmin();
+    const rows = d.members.map((m) => {
+      const sel = el("select", {}, ...["Helper", "ModeratorJr", "Moderator", "None"].filter((k) => isA || k !== "Moderator").map((k) => el("option", { value: k, selected: k === m.rank }, RANK_NAME[k])));
+      const canEdit = m.linkStatus === "approved" && (isA || m.rank !== "Moderator") && isMod();
+      return el("tr", { class: m.progress && m.progress.percent < 50 ? "is-risk" : null },
+        el("td", {}, el("span", { class: `dot ${m.online ? "dot--on" : ""}`, title: m.online ? "Conectado" : "Desconectado" }), m.discord, m.roblox ? el("div", { class: "small muted" }, link(`https://www.roblox.com/users/${m.roblox.userId}/profile`, `@${m.roblox.name}`)) : null),
+        el("td", {}, rankPill(m.rank), m.gameRank && m.gameRank !== m.rank ? el("div", { class: "small muted" }, `En el juego: ${RANK_NAME[m.gameRank]}`) : null, m.linkStatus === "pending" ? el("div", { class: "small muted" }, "vínculo pendiente") : null),
+        el("td", {}, m.online ? "ahora" : ago(m.lastSeen)),
+        el("td", {}, hours(m.hoursToday), el("div", { class: "small muted" }, `${hours(m.hoursWeek)} semana · ${hours(m.dutyWeek)} servicio`)),
+        el("td", {}, m.progress ? el("div", {}, el("div", { class: "meter meter--sm" }, el("div", { class: "meter__fill", "data-w": m.progress.percent })), el("span", { class: "small" }, `${m.progress.percent}% · ${m.progress.done}/${m.progress.required}`)) : "—"),
+        el("td", {}, m.progress ? `${m.progress.activity.actions} cmds · ${m.progress.activity.reportsFiled} rep.` : "—"),
+        el("td", {}, String(m.strikes || 0)),
+        el("td", {}, canEdit ? el("div", { class: "inline" }, sel, btn("Guardar", "btn--white", (b) => {
+          if (sel.value === m.rank) return;
+          if (sel.value === "None" && !confirm("¿Sacarlo del staff? Pierde el rango en el juego y en Discord.")) return;
+          act(b, () => api("/api/mod/staff/rank", { discordId: m.discordId, rank: sel.value }), (o) => `Rango cambiado. ${o.discord === "ok" ? "Discord actualizado." : o.discord === "error" ? "No se pudo cambiar en Discord: revisa «Bot de Discord»." : "Cámbialo a mano en Discord."}`, refreshMod);
+        })) : ""));
+    });
+    const table = rows.length ? el("div", { class: "scrollx" }, el("table", { class: "tbl" },
+      el("thead", {}, el("tr", {}, ...["Miembro", "Rango", "Última vez", "Horas hoy", "Tareas del mes", "Actividad", "Meses sin cumplir", ""].map((h) => el("th", {}, h)))), el("tbody", {}, ...rows))) : empty("Todavía no hay staff vinculado.");
+    body.replaceChildren(el("p", { class: "small muted" }, `Tareas de ${d.month}. Fecha límite del staff antiguo: ${new Date(s.linkDeadline).toLocaleDateString("es-CO", { dateStyle: "long" })}. Roles de Discord: ${d.bot ? "automáticos" : "a mano (falta el bot)"}.`),
+      tiles, ranks, coverageChart(d.coverage), el("h3", { class: "mt" }, "Equipo"), table);
+    requestAnimationFrame(() => { for (const f of body.querySelectorAll(".meter__fill")) f.style.width = `${f.dataset.w}%`; });
+  }
+
+  async function staffApplications(body) {
+    const [{ applications }, team] = await Promise.all([api("/api/mod/staff/applications"), api("/api/mod/staff")]);
+    const links = team.members.filter((m) => m.linkStatus === "pending");
+    const Q = Object.fromEntries(staffProgram.questions.map((q) => [q.key, q.label]));
+    const linkBox = links.length ? el("div", { class: "list" }, ...links.map((m) => el("article", { class: "item" },
+      el("div", { class: "item__head" }, el("span", { class: "item__title" }, `🔗 ${m.discord}`), rankPill(m.rank)),
+      el("p", { class: "item__meta" }, "Staff antiguo · Roblox ", m.roblox ? link(`https://www.roblox.com/users/${m.roblox.userId}/profile`, `@${m.roblox.name}`) : "—", ". Confirma con él que es su cuenta."),
+      el("div", { class: "item__actions" },
+        btn("Confirmar", "btn--green", (b) => act(b, () => api("/api/mod/staff/link", { discordId: m.discordId, action: "approve" }), "Cuenta confirmada.", refreshMod)),
+        btn("Rechazar", "btn--red", (b) => act(b, () => api("/api/mod/staff/link", { discordId: m.discordId, action: "reject" }), "Vínculo rechazado.", refreshMod)))))) : null;
+    const apps = applications.length ? el("div", { class: "list" }, ...applications.map((a) => {
+      const note = noteInput();
+      return el("article", { class: "item" },
+        el("div", { class: "item__head" }, el("span", { class: "item__title" }, `🛟 ${userLine(a.user)}`), pill(a.status, a.status === "contacted" ? "Contactado" : "Nueva")),
+        robloxLine(a.roblox_user_id, a.roblox_name, null, a.player),
+        el("p", { class: "item__meta" }, `Enviada ${when(a.created_at)}`),
+        el("details", { class: "answers" }, el("summary", {}, "Ver respuestas del formulario"),
+          el("dl", {}, ...Object.entries(a.answers).filter(([, v]) => v).flatMap(([k, v]) => [el("dt", {}, Q[k] || k), el("dd", {}, v === "si" ? "Sí" : v === "no" ? "No" : v)]))),
+        el("div", { class: "item__actions" }, note,
+          a.status === "pending" ? btn("Contactado", "btn--white", (b) => act(b, () => api("/api/mod/staff/application", { id: a.id, action: "contacted", note: note.value }), "Marcada como contactada.", refreshMod)) : null,
+          btn("Aprobar como Helper", "btn--green", (b) => act(b, () => api("/api/mod/staff/application", { id: a.id, action: "approve", note: note.value }), (o) => `Aprobado. ${o.discordRole === "ok" ? "Rol Helper puesto en Discord." : o.discordRole === "error" ? "No se pudo poner el rol en Discord (revisa «Bot de Discord»)." : "Dale el rol Helper en Discord."} La etiqueta y los comandos llegan solos al juego.`, refreshMod)),
+          btn("Rechazar", "btn--red", (b) => { if (!note.value.trim()) return flash("Escribe el motivo en la nota.", "bad"); act(b, () => api("/api/mod/staff/application", { id: a.id, action: "reject", note: note.value }), "Rechazada.", refreshMod); })));
+    })) : empty("No hay solicitudes de Helper pendientes.");
+    body.replaceChildren(...[linkBox && el("h3", {}, "Cuentas de staff antiguo por confirmar"), linkBox, el("h3", {}, "Solicitudes de Helper"), apps].filter(Boolean));
+  }
+
+  async function staffPromotions(body) {
+    const d = await api("/api/mod/staff");
+    body.replaceChildren(d.promotions.length ? el("div", { class: "list" }, ...d.promotions.map((p) => {
+      const note = noteInput();
+      const adminOnly = p.to_rank === "Moderator";
+      return el("article", { class: "item" },
+        el("div", { class: "item__head" }, el("span", { class: "item__title" }, `${userLine(p.user)}: ${RANK_NAME[p.from_rank]} → ${RANK_NAME[p.to_rank]}`), adminOnly ? pill("pending_admin", "Solo el Admin") : null),
+        el("p", { class: "item__meta" }, `Pedido por ${p.requested_by} · ${when(p.created_at)}`), el("p", {}, p.reason || ""),
+        (!adminOnly || isAdmin()) ? el("div", { class: "item__actions" }, note,
+          btn("Aprobar ascenso", "btn--green", (b) => act(b, () => api("/api/mod/staff/promotion", { id: p.id, action: "approve", note: note.value }), "Ascenso aprobado.", refreshMod)),
+          btn("Rechazar", "btn--red", (b) => act(b, () => api("/api/mod/staff/promotion", { id: p.id, action: "reject", note: note.value }), "Ascenso rechazado.", refreshMod))) : null);
+    })) : empty("No hay ascensos pendientes."));
+  }
+
+  async function staffLegacy(body) {
+    const d = await api("/api/mod/staff");
+    const dl = new Date(d.summary.linkDeadline).toLocaleDateString("es-CO", { dateStyle: "long" });
+    const ST = { pending: ["pending", "Sin vincular"], notified: ["pending", "Avisado en el juego"], linked: ["approved", "Vinculado"], removed: ["rejected", "Rango quitado"] };
+    body.replaceChildren(
+      el("div", { class: "notice" }, `El staff que ya existía no llena el formulario: solo vincula Discord + Roblox antes del ${dl}. Después, a quien no lo hizo se le quita el rango en el juego (al entrar) y en Discord (con el bot y «Server Members Intent»).`),
+      isAdmin() ? el("div", { class: "form-actions" }, btn("Leer los roles de Discord ahora", "btn--white", (b) => act(b, () => api("/api/mod/staff/sync", {}), (o) => `Leídos ${o.members} miembros con rol de staff · ${o.changes} cambio(s).`, refreshMod))) : null,
+      el("h3", {}, "En Discord"),
+      d.legacyDiscord.length ? el("table", { class: "tbl" }, el("thead", {}, el("tr", {}, ...["Usuario", "Rol", "Estado", "Visto"].map((h) => el("th", {}, h)))),
+        el("tbody", {}, ...d.legacyDiscord.map((x) => el("tr", {}, el("td", {}, x.username || `#${x.discord_id}`), el("td", {}, RANK_NAME[x.rank] || x.rank), el("td", {}, pill(...(ST[x.status] || ["pending", x.status]))), el("td", {}, ago(x.seen_at))))))
+        : empty("Sin datos de Discord todavía (necesita el bot con «Server Members Intent»)."),
+      el("h3", {}, "En el juego"),
+      d.legacyGame.length ? el("table", { class: "tbl" }, el("thead", {}, el("tr", {}, ...["Jugador", "Etiqueta", "Estado", "Última vez"].map((h) => el("th", {}, h)))),
+        el("tbody", {}, ...d.legacyGame.map((x) => el("tr", {}, el("td", {}, link(`https://www.roblox.com/users/${x.roblox_user_id}/profile`, `@${x.name}`)), el("td", {}, RANK_NAME[["Helper", "ModeratorJr", "Moderator"][x.staff_tier - 1]] || "—"), el("td", {}, pill(...(ST[x.status] || ["pending", x.status]))), el("td", {}, x.last_seen ? ago(x.last_seen) : "—")))))
+        : empty("Aún no entró al juego nadie con etiqueta de staff sin vincular."));
+  }
+
+  // ---------- Administración ----------
+  async function adminLuck(s) {
+    // El panel de métricas de "Prueba tu suerte" dentro del panel (misma sesión de Discord con rol admin).
+    const frame = el("iframe", { class: "embed", src: "/admin/?embed=1", title: "Prueba tu suerte: métricas, códigos y regalos" });
+    window.addEventListener("message", function onMsg(ev) {
+      if (ev.origin !== location.origin || !ev.data || ev.data.type !== "se-admin-height") return;
+      if (!frame.isConnected) return window.removeEventListener("message", onMsg);
+      frame.style.height = `${Math.max(600, Number(ev.data.height) || 0) + 20}px`;
+    });
+    s.replaceChildren(el("div", { class: "box box--flush" }, frame));
+  }
+
+  async function adminDiscord(body) {
+    const uid = el("input", { placeholder: "ID de Discord de un usuario (opcional)", inputmode: "numeric", maxlength: "25" });
+    const out = el("div");
+    const run = async (b) => {
+      b.disabled = true;
+      out.replaceChildren(el("p", { class: "small muted" }, "Comprobando…"));
+      try {
+        const r = await api(`/api/mod/discord/check${uid.value.trim() ? `?userId=${encodeURIComponent(uid.value.trim())}` : ""}`);
+        out.replaceChildren(el("div", { class: `notice ${r.ok ? "notice--ok" : "notice--bad"}` }, r.ok ? "✅ Todo listo: el bot puede poner y quitar los roles." : "❌ Hay algo por arreglar (mira la primera línea en rojo)."),
+          el("ul", { class: "checks" }, ...r.checks.map((c) => el("li", { class: c.ok ? "ok" : "bad" }, el("strong", {}, `${c.ok ? "✔" : "✖"} ${c.label}`), c.detail ? el("span", { class: "small muted" }, ` — ${c.detail}`) : null))));
+      } catch (e) { out.replaceChildren(el("div", { class: "notice notice--bad" }, errText(e))); } finally { b.disabled = false; }
+    };
+    body.replaceChildren(
+      el("ol", { class: "list-plain small" },
+        el("li", {}, "Un error 404 al poner un rol casi siempre es que el bot no está en el servidor (código 10004) o que ese usuario ya salió del servidor (10007)."),
+        el("li", {}, "403 = al bot le falta «Gestionar roles» o su rol está por debajo del rol que intenta poner."),
+        el("li", {}, "Para leer quién tiene rol de staff en Discord, activa «Server Members Intent» en la pestaña Bot de tu app.")),
+      el("div", { class: "form-actions" }, uid, btn("Comprobar", "btn--yolk", run)), out);
+  }
+
   // ---------- Arranque ----------
   async function start() {
     const params = new URLSearchParams(location.search);
@@ -822,24 +1205,31 @@
     if (loginErr) flash(LOGIN_ERRORS[loginErr] || "No se pudo iniciar sesión.", "bad");
     if (!me.user) {
       $("view-app").hidden = true; $("who").hidden = true; $("view-login").hidden = false;
+      document.body.classList.remove("is-app"); $("nav").replaceChildren(); $("page-title").textContent = "Panel";
       $("login-btn").href = `/api/auth/discord/login?next=${encodeURIComponent("/creadores/panel/" + (location.hash || ""))}`;
       if (!me.discord) flash(LOGIN_ERRORS.discord_off, "bad");
       return;
     }
     $("view-login").hidden = true; $("view-app").hidden = false; $("who").hidden = false;
+    document.body.classList.add("is-app");
     const u = me.user;
     $("who-pic").src = u.avatar || "/img/icon-192.png";
     $("who-name").textContent = u.globalName || u.username;
+    const RANK_NAME = { Helper: "Helper", ModeratorJr: "Moderator Jr", Moderator: "Moderator" };
     $("who-badges").replaceChildren(...[
       u.roles.admin && el("span", { class: "badge badge--admin" }, "Admin"),
-      !u.roles.admin && u.roles.moderator && el("span", { class: "badge badge--mod" }, "Moderador"),
+      !u.roles.admin && u.roles.staffRank && el("span", { class: `badge badge--staff badge--${u.roles.staffRank}` }, RANK_NAME[u.roles.staffRank]),
+      !u.roles.admin && !u.roles.staffRank && u.roles.moderator && el("span", { class: "badge badge--mod" }, "Moderador"),
       u.roles.creator && el("span", { class: "badge badge--creator" }, "Creador"),
     ].filter(Boolean));
-    for (const b of document.querySelectorAll("[data-role]")) b.hidden = b.dataset.role === "admin" ? !u.roles.admin : !isMod();
-    if (isMod()) api("/api/mod/queue").then((q) => { queue = q; renderTabs(); }).catch(() => {});
+    if (!staffProgram) staffProgram = await api("/api/staff/program").catch(() => null);
+    renderNav();
+    if (isModJr()) loadQueue().catch(() => {});
     show((location.hash || "#inicio").slice(1));
   }
 
+  $("burger").addEventListener("click", () => document.body.classList.toggle("nav-open"));
+  $("scrim").addEventListener("click", () => document.body.classList.remove("nav-open"));
   $("logout").addEventListener("click", async () => {
     await api("/api/auth/logout", {}).catch(() => {});
     me = null; creator = null; queue = null;

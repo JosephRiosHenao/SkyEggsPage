@@ -239,6 +239,96 @@ export function openDb(path) {
       removed_at INTEGER
     );
   `);
+  // ---------- Programa de staff (2026-11-23) ----------
+  if (!cols("discord_users").includes("staff_discord")) db.exec("ALTER TABLE discord_users ADD COLUMN staff_discord TEXT");
+  if (!cols("players").includes("staff_tier")) db.exec("ALTER TABLE players ADD COLUMN staff_tier INTEGER");
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS staff (
+      discord_id TEXT PRIMARY KEY,
+      roblox_user_id INTEGER,
+      roblox_name TEXT,
+      roblox_display TEXT,
+      rank TEXT NOT NULL,             -- Helper | ModeratorJr | Moderator | None (fuera)
+      link_status TEXT NOT NULL,      -- pending | approved
+      legacy INTEGER NOT NULL DEFAULT 0,   -- ya era staff antes del programa
+      joined_at INTEGER NOT NULL,
+      rank_changed_at INTEGER,
+      strikes INTEGER NOT NULL DEFAULT 0,  -- meses seguidos sin cumplir las tareas
+      eval_month TEXT,                -- último mes cerrado
+      warn_month TEXT,                -- mes en que se le avisó
+      reviewed_by TEXT, reviewed_at INTEGER, note TEXT
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS staff_roblox ON staff(roblox_user_id) WHERE link_status = 'approved' AND rank != 'None';
+    CREATE TABLE IF NOT EXISTS staff_applications (
+      id INTEGER PRIMARY KEY,
+      discord_id TEXT NOT NULL,
+      roblox_user_id INTEGER NOT NULL,
+      roblox_name TEXT NOT NULL,
+      answers TEXT NOT NULL,          -- JSON {pregunta: respuesta}
+      status TEXT NOT NULL DEFAULT 'pending',  -- pending | contacted | approved | rejected
+      created_at INTEGER NOT NULL,
+      reviewed_by TEXT, reviewed_at INTEGER, review_note TEXT
+    );
+    CREATE INDEX IF NOT EXISTS staff_apps_discord ON staff_applications(discord_id, id);
+    CREATE TABLE IF NOT EXISTS staff_evidence (
+      id INTEGER PRIMARY KEY,
+      discord_id TEXT NOT NULL,
+      task TEXT NOT NULL,
+      month TEXT NOT NULL,            -- AAAA-MM
+      amount INTEGER NOT NULL,        -- lo que pide sumar
+      approved INTEGER,               -- lo que sumó el moderador
+      url TEXT, file TEXT, note TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',  -- pending | approved | rejected
+      created_at INTEGER NOT NULL,
+      reviewed_by TEXT, reviewed_id TEXT, reviewed_at INTEGER, review_note TEXT
+    );
+    CREATE INDEX IF NOT EXISTS staff_ev_owner ON staff_evidence(discord_id, month, status);
+    CREATE TABLE IF NOT EXISTS staff_days (
+      day TEXT NOT NULL, user_id INTEGER NOT NULL,
+      seconds INTEGER NOT NULL DEFAULT 0, duty_seconds INTEGER NOT NULL DEFAULT 0,
+      actions INTEGER NOT NULL DEFAULT 0, sanctions INTEGER NOT NULL DEFAULT 0, helps INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (day, user_id)
+    );
+    CREATE TABLE IF NOT EXISTS staff_hours (
+      hour TEXT NOT NULL, user_id INTEGER NOT NULL, seconds INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (hour, user_id)
+    );
+    CREATE TABLE IF NOT EXISTS pull_hours (
+      hour TEXT NOT NULL, job_id TEXT NOT NULL, players INTEGER NOT NULL,
+      PRIMARY KEY (hour, job_id)
+    );
+    CREATE TABLE IF NOT EXISTS reports (
+      id INTEGER PRIMARY KEY,
+      reporter_id INTEGER NOT NULL, reporter_name TEXT NOT NULL,
+      target_id INTEGER NOT NULL, target_name TEXT NOT NULL,
+      reason TEXT NOT NULL, online INTEGER NOT NULL DEFAULT 0, job_id TEXT,
+      status TEXT NOT NULL DEFAULT 'open',   -- open | resolved | dismissed
+      created_at INTEGER NOT NULL,
+      resolved_by TEXT, resolved_id TEXT, resolved_at INTEGER, note TEXT
+    );
+    CREATE INDEX IF NOT EXISTS reports_status ON reports(status, created_at);
+    CREATE TABLE IF NOT EXISTS staff_promotions (
+      id INTEGER PRIMARY KEY,
+      discord_id TEXT NOT NULL,
+      from_rank TEXT NOT NULL, to_rank TEXT NOT NULL,
+      requested_by TEXT NOT NULL, requested_id TEXT NOT NULL, reason TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',  -- pending | approved | rejected
+      created_at INTEGER NOT NULL,
+      reviewed_by TEXT, reviewed_at INTEGER, review_note TEXT
+    );
+    CREATE TABLE IF NOT EXISTS staff_legacy_game (
+      roblox_user_id INTEGER PRIMARY KEY,
+      name TEXT NOT NULL, staff_tier INTEGER NOT NULL,
+      status TEXT NOT NULL,           -- notified | linked | removed
+      notified_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS staff_legacy_discord (
+      discord_id TEXT PRIMARY KEY,
+      username TEXT, rank TEXT, seen_at INTEGER NOT NULL,
+      status TEXT NOT NULL,           -- pending | linked | removed
+      removed_at INTEGER
+    );
+  `);
   return db;
 }
 

@@ -1,0 +1,34 @@
+/* Página pública del staff: reutiliza creadores.css y añade rangos, comandos y tabla de tareas. */
+.st-ranks { padding: 5rem 0; background: var(--noche, #231A63); color: #fff; }
+.st-ranks__grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.4rem; margin-top: 2rem; align-items: start; }
+.st-rank { --c: #38BDF8; background: rgba(255,255,255,.06); border: 3px solid var(--c); border-radius: 24px; padding: 1.3rem 1.3rem 1.5rem; }
+.st-rank--ModeratorJr { --c: #10B981; }
+.st-rank--Moderator { --c: #22C55E; }
+.st-rank__step { font-family: var(--display); color: var(--c); font-size: 1.05rem; }
+.st-rank h3 { font-family: var(--display); font-weight: 400; font-size: 1.8rem; margin-top: .2rem; }
+.st-rank__sum { color: #E2DCFF; font-weight: 700; margin-top: .4rem; }
+.st-rank h4 { margin-top: 1rem; font-size: .95rem; color: var(--c); text-transform: uppercase; letter-spacing: .05em; }
+.st-rank ul { margin-top: .4rem; padding-left: 1.1rem; display: grid; gap: .3rem; color: #fff; }
+.st-commands { padding: 4.5rem 0; }
+.st-cmds { max-width: 900px; margin-top: 1rem; border: 3px solid var(--tinta); border-radius: 18px; background: var(--blanco); }
+.st-cmds summary { cursor: pointer; padding: 1rem 1.2rem; font-weight: 800; font-size: 1.15rem; list-style: none; }
+.st-cmds summary::after { content: "+"; float: right; font-family: var(--display); font-size: 1.4rem; line-height: 1; }
+.st-cmds[open] summary::after { content: "–"; }
+.st-cmds dl { display: grid; grid-template-columns: minmax(200px, 34%) 1fr; gap: .5rem 1.2rem; padding: 0 1.2rem 1.2rem; margin: 0; }
+.st-cmds dt code { font-weight: 800; color: var(--noche-2, #3B2BA0); font-family: inherit; }
+.st-cmds dd { margin: 0; color: var(--tinta-suave); }
+.st-tasks { padding: 4.5rem 0; background: #F4F8FF; }
+.st-table { overflow-x: auto; margin-top: 1.6rem; border: 3px solid var(--tinta); border-radius: 18px; background: var(--blanco); }
+.st-table table { width: 100%; border-collapse: collapse; min-width: 720px; }
+.st-table th, .st-table td { padding: .8rem 1rem; text-align: left; border-bottom: 2px solid #E6ECF7; vertical-align: top; }
+.st-table thead th { font-family: var(--display); font-weight: 400; font-size: 1.05rem; background: #EEF3FF; }
+.st-table tbody th { font-weight: 800; }
+.st-table tbody th span:not(.st-tag) { display: block; font-weight: 600; font-size: .88rem; color: var(--tinta-suave); margin-top: .2rem; }
+.st-table td { font-weight: 800; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.st-tag { display: inline-block; padding: 0 .45rem; border-radius: 999px; background: var(--yema); font-size: .72rem; vertical-align: 2px; }
+.st code { font-family: inherit; font-weight: 800; color: var(--noche-2, #3B2BA0); }
+@media (max-width: 900px) {
+  .st-ranks__grid { grid-template-columns: 1fr; }
+  .st-cmds dl { grid-template-columns: 1fr; }
+  .st-cmds dd { margin-bottom: .5rem; }
+}

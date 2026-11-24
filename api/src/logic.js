@@ -1,5 +1,6 @@
 // Reglas del sorteo, premios, códigos y métricas. Sin HTTP: así se puede probar directo.
 import { handleGameCreator } from "./lifecycle.js";
+import { handleGameStaff, recordPullHour } from "./staff.js";
 import { randomInt, randomBytes } from "node:crypto";
 import { TIERS, PRIZE_TIERS } from "./config.js";
 import { tx } from "./db.js";
@@ -102,7 +103,12 @@ function cleanPlayer(p) {
   // Nivel de creador que tiene en el juego (0 = ninguno, 1 = Creator … 5 = Elite). Solo lo manda /pull.
   const ct = Number(p.creatorTier);
   const creatorTier = Number.isInteger(ct) && ct >= 0 && ct <= 5 ? ct : null;
-  return { userId, name, displayName, level, creatorTier };
+  // Programa de staff: rango (0 = no, 1 Helper, 2 Moderator Jr, 3 Moderator), en servicio y comandos usados.
+  const stv = Number(p.staffTier);
+  const staffTier = Number.isInteger(stv) && stv >= 0 && stv <= 3 ? stv : null;
+  const sa = p.staffActions && typeof p.staffActions === "object" ? p.staffActions : null;
+  const staffActions = sa ? { total: Number(sa.total) || 0, sanctions: Number(sa.sanctions) || 0, helps: Number(sa.helps) || 0 } : null;
+  return { userId, name, displayName, level, creatorTier, staffTier, duty: p.duty === true, staffActions };
 }
 const cleanJob = (j) => (typeof j === "string" ? j.replace(/[^A-Za-z0-9-]/g, "").slice(0, 64) : "") || "studio";
 
@@ -127,8 +133,12 @@ export function gamePull(db, cfg, body, now = Date.now()) {
       .run(day, jobId);
     const pending = db.prepare("SELECT id, user_id AS userId, tier, source, kind, pack, period FROM rewards WHERE user_id = ? AND status = 'pending' ORDER BY created_at LIMIT 20");
     const rewards = [];
+    recordPullHour(db, jobId, players.length, now);
+    const seen = db.prepare("SELECT last_seen FROM players WHERE user_id = ?");
     for (const p of players) {
+      const prevSeen = seen.get(p.userId)?.last_seen || null;
       upsertGamePlayer(db, p, day, now);
+      handleGameStaff(db, cfg, p, prevSeen, now);
       // Creadores antiguos (aviso / quitar el rol) y nivel actual en el juego.
       if (p.creatorTier != null) handleGameCreator(db, cfg, p, now);
       const lowLevel = cfg.minLevel > 0 && !(p.level >= cfg.minLevel);

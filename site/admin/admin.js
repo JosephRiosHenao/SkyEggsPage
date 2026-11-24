@@ -274,3 +274,12 @@
   const start = () => { show("dash"); load(); loadCodes(); };
   api("/api/admin/me").then(start).catch(() => show("login"));
 })();
+
+// Dentro del panel (/creadores/panel/#admin-suerte): sin cabecera propia y avisando la altura.
+(() => {
+  if (new URLSearchParams(location.search).get("embed") !== "1" || window.parent === window) return;
+  document.documentElement.classList.add("is-embed");
+  const post = () => window.parent.postMessage({ type: "se-admin-height", height: document.documentElement.scrollHeight }, location.origin);
+  new ResizeObserver(post).observe(document.body);
+  window.addEventListener("load", post);
+})();

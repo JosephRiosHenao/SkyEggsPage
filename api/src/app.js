@@ -5,7 +5,9 @@ import { join } from "node:path";
 import { doRoll, gamePull, gameAck, gameRedeem, recordVisit, metrics, remainingToday, adminCreateCodes, adminListCodes, adminGift } from "./logic.js";
 import { searchPlayers } from "./roblox.js";
 import { safeEqual, verifyPassword, createSession, checkSession, getSession, deleteSession, readCookie, COOKIE, SESSION_MS, USER_COOKIE, USER_SESSION_MS } from "./auth.js";
-import { discordEnabled, authorizeUrl, fetchDiscordIdentity, rolesFrom, notifyMods, botEnabled, rolesForTier, setMemberRoles } from "./discord.js";
+import { discordEnabled, authorizeUrl, fetchDiscordIdentity, rolesFrom, notifyMods, botEnabled, rolesForTier, rolesForStaff, setMemberRoles, diagnoseBot, listMembersWithRoles } from "./discord.js";
+import * as S from "./staff.js";
+import { publicStaffProgram } from "./staffProgram.js";
 import { evaluateCreators, setCreatorTier, legacyList, noticeList } from "./lifecycle.js";
 import { publicCreators, clearPublicCache, creatorsDashboard, creatorDetail } from "./insights.js";
 import { LEVEL_KEYS } from "./program.js";
@@ -64,11 +66,15 @@ export async function runRoleJobs(db, cfg, jobs, fetchImpl = fetch, log = consol
   if (!jobs?.length || !botEnabled(cfg)) return [];
   const results = [];
   for (const job of jobs) {
-    const roles = rolesForTier(cfg, job.tierKey);
-    const r = await setMemberRoles(cfg, job.discordId, roles, `Sky Eggs creadores: ${job.reason || job.tierKey}`, fetchImpl);
-    if (r.ok) db.prepare("UPDATE discord_users SET is_creator = ? WHERE id = ?").run(job.tierKey === "None" ? 0 : 1, String(job.discordId));
+    if (!job) continue;
+    // Trabajo de staff (staffRank) o de creador (tierKey).
+    const isStaff = job.staffRank !== undefined;
+    const roles = isStaff ? rolesForStaff(cfg, job.staffRank) : rolesForTier(cfg, job.tierKey);
+    const r = await setMemberRoles(cfg, job.discordId, roles, `Sky Eggs ${isStaff ? "staff" : "creadores"}: ${job.reason || job.staffRank || job.tierKey}`, fetchImpl);
+    if (r.ok && isStaff) db.prepare("UPDATE discord_users SET staff_discord = ? WHERE id = ?").run(job.staffRank === "None" ? null : job.staffRank, String(job.discordId));
+    else if (r.ok) db.prepare("UPDATE discord_users SET is_creator = ? WHERE id = ?").run(job.tierKey === "None" ? 0 : 1, String(job.discordId));
     else log.warn(`[discord] roles de ${job.discordId}: ${r.errors.join(", ")}`);
-    C.audit(db, { id: "system", name: "Bot de Discord", role: "system" }, r.ok ? "discord.roles" : "discord.roles_error", `#${job.discordId}`, { rango: job.tierKey, hecho: r.done.join(" ") || null, errores: r.errors.join(" · ") || null });
+    C.audit(db, { id: "system", name: "Bot de Discord", role: "system" }, r.ok ? "discord.roles" : "discord.roles_error", `#${job.discordId}`, { rango: isStaff ? `staff ${job.staffRank}` : job.tierKey, hecho: r.done.join(" ") || null, errores: r.errors.join(" · ") || null });
     results.push(r);
   }
   return results;
@@ -77,6 +83,7 @@ export async function runRoleJobs(db, cfg, jobs, fetchImpl = fetch, log = consol
 // Rangos automáticos: revisa a los creadores cada 15 min (ascensos, avisos y bajadas).
 export function startLifecycle({ db, cfg, fetchImpl = fetch, log = console }) {
   let running = false;
+  let lastDiscordSync = 0;
   const tick = async () => {
     if (running) return;
     running = true;
@@ -87,6 +94,16 @@ export function startLifecycle({ db, cfg, fetchImpl = fetch, log = console }) {
         clearPublicCache();
       }
       await runRoleJobs(db, cfg, out.roleJobs, fetchImpl, log);
+      // Staff: cierre de mes, avisos y (cada 30 min) roles de Discord del staff.
+      const st = S.evaluateStaff(db, cfg);
+      if (st.removed || st.warnings) log.info(`[staff] ${st.removed} fuera por tareas, ${st.warnings} aviso(s)`);
+      await runRoleJobs(db, cfg, st.roleJobs, fetchImpl, log);
+      if (botEnabled(cfg) && Date.now() - lastDiscordSync > 30 * 60_000) {
+        lastDiscordSync = Date.now();
+        const members = await listMembersWithRoles(cfg, Object.values(cfg.discord.staffRoles), fetchImpl);
+        if (members) await runRoleJobs(db, cfg, S.syncDiscordStaff(db, cfg, members), fetchImpl, log);
+        else log.warn("[staff] no se pudo listar a los miembros de Discord: activa «Server Members Intent» en el bot");
+      }
     } catch (e) { log.error("[creadores]", e); } finally { running = false; }
   };
   const timer = setInterval(tick, 15 * 60_000);
@@ -154,7 +171,7 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
   // Usuario de Discord con sesión (o null). Los roles se leen de Discord en cada login.
   function currentUser(req) {
     const s = getSession(db, readCookie(req.headers.cookie, USER_COOKIE), "discord");
-    return s ? C.getDiscordUser(db, s.discord_id) : null;
+    return s ? S.withStaffRoles(db, cfg, C.getDiscordUser(db, s.discord_id)) : null;
   }
   function requireUser(req) {
     const u = currentUser(req);
@@ -163,14 +180,26 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
   }
   const passwordAdmin = (req) => checkSession(db, readCookie(req.headers.cookie, COOKIE));
   // Quién hace una acción de staff (queda en el registro con su nombre).
-  function staffActor(req, adminOnly = false) {
-    if (passwordAdmin(req)) return { id: `local:${cfg.adminUser}`, name: `${cfg.adminUser} (panel)`, role: "admin" };
+  // min: "admin" | "moderator" (por defecto) | "modjr" | "helper". El actor lleva su rango de staff.
+  function staffActor(req, adminOnly = false, min = "moderator") {
+    if (passwordAdmin(req)) return { id: `local:${cfg.adminUser}`, name: `${cfg.adminUser} (panel)`, role: "admin", staffRank: null };
     const u = currentUser(req);
-    if (u && u.roles.admin) return { id: u.id, name: u.globalName ? `${u.globalName} (@${u.username})` : `@${u.username}`, role: "admin" };
-    if (!adminOnly && u && u.roles.moderator) return { id: u.id, name: u.globalName ? `${u.globalName} (@${u.username})` : `@${u.username}`, role: "moderator" };
+    const name = u && (u.globalName ? `${u.globalName} (@${u.username})` : `@${u.username}`);
+    if (u && u.roles.admin) return { id: u.id, name, role: "admin", staffRank: u.roles.staffRank };
+    const need = adminOnly ? "admin" : min;
+    const role = u?.roles.moderator ? "moderator" : u?.roles.modjr ? "modjr" : u?.roles.helper ? "helper" : null;
+    const order = { helper: 1, modjr: 2, moderator: 3, admin: 4 };
+    if (u && role && order[role] >= order[need]) return { id: u.id, name, role, staffRank: u.roles.staffRank };
     throw new HttpError(u ? 403 : 401, u ? "forbidden" : "unauthorized");
   }
+  const staffMember = (req, min) => staffActor(req, false, min);
   function requireAdmin(req) { return staffActor(req, true); }
+  function requireCreatorOrStaff(req) {
+    const u = requireUser(req);
+    if (!u.roles.creator && !u.roles.admin && !u.roles.staffLinked) throw new HttpError(403, "creator_only");
+    if (!limits.creator.take(u.id)) throw new HttpError(429, "slow_down");
+    return u;
+  }
   function requireCreator(req) {
     const u = requireUser(req);
     if (!u.roles.creator && !u.roles.admin) throw new HttpError(403, "creator_only");
@@ -253,6 +282,14 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
       const body = await readJson(req, 2048);
       if (!limits.redeem.take(`u${Number(body.userId) || 0}`)) return { ok: false, error: "slow_down" };
       return gameRedeem(db, cfg, body);
+    },
+
+    "POST /api/game/staff/report": async (req) => {
+      requireGame(req);
+      const body = await readJson(req, 4096);
+      const out = S.recordReport(db, body);
+      if (out.ok) notifyMods(cfg, `📣 Reporte del juego: ${String(body.reporterName).slice(0, 20)} reportó a ${String(body.targetName).slice(0, 20)} — ${cfg.siteUrl}/creadores/panel/#reportes`, fetchImpl);
+      return out;
     },
 
     // ----- Panel -----
@@ -342,7 +379,7 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
     "GET /api/me": async (req) => {
       const u = currentUser(req);
       if (!u) return { status: 200, body: { user: null, discord: discordEnabled(cfg) } };
-      return { user: u, discord: true, application: C.myApplication(db, u.id) };
+      return { user: u, discord: true, application: C.myApplication(db, u.id), staffApplication: S.myStaffApplication(db, u.id) };
     },
 
     // ----- Programa de creadores -----
@@ -384,7 +421,7 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
     },
     "POST /api/creators/upload": async (req) => {
       checkOrigin(req);
-      const u = requireCreator(req);
+      const u = requireCreatorOrStaff(req);
       if (!limits.upload.take(u.id)) throw new HttpError(429, "slow_down");
       const { buf, ext } = await readImage(req);
       mkdirSync(cfg.uploadsDir, { recursive: true });
@@ -435,8 +472,104 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
       return out;
     },
 
+    // ----- Programa de staff -----
+    "GET /api/staff/program": async () => publicStaffProgram(cfg),
+    "GET /api/staff/me": async (req) => { const u = requireUser(req); return S.myStaffState(db, cfg, u); },
+    "POST /api/staff/apply": async (req) => {
+      checkOrigin(req);
+      const u = requireUser(req);
+      if (!limits.apply.take(`s${u.id}`)) throw new HttpError(429, "slow_down");
+      const body = await readJson(req, 40_000);
+      const out = run(() => S.submitStaffApplication(db, u.id, body));
+      notifyMods(cfg, `🛟 Nueva solicitud de Helper de @${u.username}: ${cfg.siteUrl}/creadores/panel/#staff-solicitudes`, fetchImpl);
+      return out;
+    },
+    "POST /api/staff/link": async (req) => {
+      checkOrigin(req);
+      const u = requireUser(req);
+      const body = await readJson(req, 512);
+      const out = run(() => tx(db, () => S.requestStaffLink(db, cfg, u, body)));
+      if (out.job) await runRoleJobs(db, cfg, [out.job], fetchImpl, log);
+      if (!out.auto) notifyMods(cfg, `🔗 @${u.username} (staff ${out.rank}) pidió vincular la cuenta de Roblox @${out.roblox.name}.`, fetchImpl);
+      return { ok: true, auto: out.auto, rank: out.rank };
+    },
+    "POST /api/staff/evidence": async (req) => {
+      checkOrigin(req);
+      const u = requireUser(req);
+      if (!limits.creator.take(u.id)) throw new HttpError(429, "slow_down");
+      const body = await readJson(req, 4096);
+      return run(() => S.addStaffEvidence(db, u.id, body));
+    },
+    "POST /api/staff/promotion": async (req) => {
+      checkOrigin(req);
+      const a = staffMember(req, "helper");
+      const body = await readJson(req, 2048);
+      return run(() => S.requestPromotion(db, a, body));
+    },
+
+    // ----- Moderación del staff -----
+    "GET /api/mod/staff": async (req) => { staffMember(req, "modjr"); return { ...S.staffDashboard(db, cfg), bot: botEnabled(cfg) }; },
+    "GET /api/mod/staff/applications": async (req) => { staffActor(req); return { applications: S.staffApplicationsQueue(db) }; },
+    "POST /api/mod/staff/application": async (req) => {
+      checkOrigin(req); const a = staffActor(req); const b = await readJson(req, 2048);
+      const out = run(() => tx(db, () => S.reviewStaffApplication(db, a, b)));
+      const r = out.job ? await runRoleJobs(db, cfg, [out.job], fetchImpl, log) : [];
+      return { ok: true, status: out.status, discordRole: !out.job ? null : botEnabled(cfg) ? (r[0]?.ok ? "ok" : "error") : "manual" };
+    },
+    "POST /api/mod/staff/link": async (req) => {
+      checkOrigin(req); const a = staffActor(req); const b = await readJson(req, 1024);
+      const out = run(() => tx(db, () => S.reviewStaffLink(db, a, b)));
+      if (out.job) await runRoleJobs(db, cfg, [out.job], fetchImpl, log);
+      return { ok: true };
+    },
+    "GET /api/mod/staff/evidence": async (req) => { const a = staffMember(req, "modjr"); return { evidences: S.staffEvidenceQueue(db, a) }; },
+    "POST /api/mod/staff/evidence": async (req) => { checkOrigin(req); const a = staffMember(req, "modjr"); const b = await readJson(req, 2048); return run(() => S.reviewStaffEvidence(db, a, b)); },
+    "POST /api/mod/staff/rank": async (req) => {
+      checkOrigin(req); const a = staffActor(req); const b = await readJson(req, 1024);
+      const out = run(() => tx(db, () => S.changeStaffRank(db, a, b)));
+      const r = await runRoleJobs(db, cfg, [out.job], fetchImpl, log);
+      return { ok: true, discord: botEnabled(cfg) ? (r[0]?.ok ? "ok" : "error") : "manual" };
+    },
+    "POST /api/mod/staff/promotion": async (req) => {
+      checkOrigin(req); const a = staffActor(req); const b = await readJson(req, 1024);
+      const out = run(() => tx(db, () => S.reviewPromotion(db, a, b)));
+      if (out.job) await runRoleJobs(db, cfg, [out.job], fetchImpl, log);
+      return { ok: true };
+    },
+    "GET /api/mod/reports": async (req, url) => { staffMember(req, "modjr"); return { reports: S.reportsList(db, url.searchParams.get("status") || "open") }; },
+    "POST /api/mod/report": async (req) => { checkOrigin(req); const a = staffMember(req, "modjr"); const b = await readJson(req, 2048); return run(() => S.reviewReport(db, a, b)); },
+    // Diagnóstico del bot de Discord: qué falta para poner roles (y si un usuario está en el servidor).
+    "GET /api/mod/discord/check": async (req, url) => {
+      staffActor(req);
+      const userId = url.searchParams.get("userId");
+      const roles = { "Content Creator": cfg.discord.roles.creator, ...Object.fromEntries(Object.entries(cfg.discord.staffRoles).map(([k, v]) => [k, v])) };
+      for (const [k, v] of Object.entries(cfg.discord.levelRoles || {})) if (v) roles[`Creator ${k}`] = v;
+      return diagnoseBot(cfg, roles, userId && /^\d{5,25}$/.test(userId) ? userId : null, fetchImpl);
+    },
+    "POST /api/mod/staff/sync": async (req) => {
+      checkOrigin(req); requireAdmin(req);
+      const members = await listMembersWithRoles(cfg, Object.values(cfg.discord.staffRoles), fetchImpl);
+      if (!members) throw new HttpError(400, "members_intent");
+      const jobs = S.syncDiscordStaff(db, cfg, members);
+      await runRoleJobs(db, cfg, jobs, fetchImpl, log);
+      return { ok: true, members: members.length, changes: jobs.length };
+    },
+
     // ----- Moderación (moderadores y admin) -----
-    "GET /api/mod/queue": async (req) => { const a = staffActor(req); return { actor: a, ...C.modQueue(db, a) }; },
+    "GET /api/mod/queue": async (req) => {
+      const a = staffMember(req, "modjr");
+      const mod = a.role === "admin" || a.role === "moderator";
+      const empty = { applications: [], links: [], evidences: [], bonuses: [], specials: [] };
+      // Conteos del staff para la barra lateral.
+      const staffCounts = {
+        reports: db.prepare("SELECT COUNT(*) AS n FROM reports WHERE status = 'open'").get().n,
+        evidence: S.staffEvidenceQueue(db, a).length,
+        applications: mod ? db.prepare("SELECT COUNT(*) AS n FROM staff_applications WHERE status IN ('pending','contacted')").get().n : 0,
+        promotions: mod ? db.prepare("SELECT COUNT(*) AS n FROM staff_promotions WHERE status = 'pending'").get().n : 0,
+        links: mod ? db.prepare("SELECT COUNT(*) AS n FROM staff WHERE link_status = 'pending'").get().n : 0,
+      };
+      return { actor: a, ...(mod ? C.modQueue(db, a) : empty), staff: staffCounts };
+    },
     "GET /api/mod/applications": async (req, url) => { staffActor(req); return { applications: C.modApplications(db, url.searchParams.get("status") || "all") }; },
     "GET /api/mod/creators": async (req) => { staffActor(req); return { ...creatorsDashboard(db, cfg), bot: botEnabled(cfg) }; },
     "GET /api/mod/creator": async (req, url) => {
@@ -516,7 +649,8 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
     let allowed = false;
     try { staffActor(req); allowed = true; } catch {
       const u = currentUser(req);
-      allowed = Boolean(u && db.prepare("SELECT 1 FROM evidences WHERE file = ? AND discord_id = ?").get(name, u.id));
+      allowed = Boolean(u && (db.prepare("SELECT 1 FROM evidences WHERE file = ? AND discord_id = ?").get(name, u.id)
+        || db.prepare("SELECT 1 FROM staff_evidence WHERE file = ? AND discord_id = ?").get(name, u.id)));
     }
     if (!allowed) throw new HttpError(403, "forbidden");
     const path = join(cfg.uploadsDir, name);
