@@ -233,7 +233,27 @@ Página pública: `/staff/` (generada con `node scripts/build-staff-page.mjs` de
 - **Entrar**: el aspirante entra con Discord, elige su cuenta de Roblox (tiene que haber jugado) y responde el formulario de Helper. Un **Moderator** (o el Admin) lo aprueba: el juego recibe `staffset` (etiqueta HELPER + rol de HD Admin) y un correo; con el bot, el rol de Discord.
 - **Ascensos**: Helper → Moderator Jr lo aprueba un Moderator o el Admin; Moderator Jr → Moderator **solo el Admin**. Todo pasa por `audit()`.
 - **Staff antiguo**: no llena formulario; vincula su Roblox antes de `STAFF_LINK_DEADLINE` (1/12/2026). Si el juego ya lo vio con su etiqueta, se confirma solo; si no, lo confirma un Moderator. Después de la fecha: al entrar al juego pierde la etiqueta y, con el bot + Server Members Intent, el rol de Discord.
-- **Tareas mensuales** (tabla en `/staff/`): horas, horas con `;Duty`, días activos, acciones de moderación y revisiones en el panel se miden solas; ayudas, invitaciones y eventos con evidencias que aprueba un rango superior. Aviso el día `STAFF_WARN_DAY` si va por debajo del 50 %; cada mes sin cumplir suma una falta y con `STAFF_FAIL_MONTHS_TO_REMOVE` seguidas sale del staff.
+- **Tareas mensuales** (tabla en `/staff/`):
+  - se miden solas: semanas con la cuota cumplida, horas con `;Duty`, días activos, acciones de moderación y revisiones en el panel;
+  - con evidencias que aprueba un rango superior: ayudas, invitaciones y eventos.
+- **Ajustes del staff** (panel → Administración → Ajustes del staff, solo el Admin; se guardan en la base de datos y quedan en el Registro):
+  - metas por rango;
+  - cuota semanal;
+  - actividad en Discord;
+  - requisitos de ascenso;
+  - faltas, avisos y excusas.
+  - Las variables `STAFF_*` son solo los valores iniciales.
+- **Cuota semanal**: juego + crédito de Discord ≥ horas del rango, y el juego ≥ el mínimo del rango.
+- **Actividad en Discord**:
+  1. El Admin elige los canales (IDs).
+  2. Cada 5 min el bot lee quién escribió y cuándo (`GET /channels/{id}/messages?after=`). Nunca lee el texto, así que no hace falta Message Content Intent.
+  3. Necesita **Ver canal** y **Leer el historial de mensajes** en esos canales.
+  4. Cada ventana de 5 min con un mensaje suma 5 min, con un tope diario.
+- **Excusas**: el miembro excusa una semana o un mes (actual o anterior) y la revisa un rango superior.
+  - Si la aprueban: la semana cuenta como cumplida, o el mes no suma falta.
+  - Al llegar al tope de faltas, sale después de `excuseDays` (5) si no tiene una excusa aprobada o en revisión. Le llega el aviso `staff_removal_warning` al buzón.
+- **Ascenso**: el propio miembro solo lo pide si cumple los requisitos (días en el rango, % del mes, meses cumplidos seguidos). Un rango superior puede proponerlo igual.
+- **Inicio del panel**: pendientes por prioridad (urgente / importante / cuando puedas) y accesos rápidos según el rol (`GET /api/home`).
 - **Reportes**: cualquier jugador usa `;Report <jugador> <motivo>` en el juego → `/api/game/staff/report` → panel "Reportes del juego".
 - **Métricas**: "Equipo y métricas" muestra quién está conectado, última vez, horas, progreso y la cobertura por hora (jugadores vs minutos de staff).
 

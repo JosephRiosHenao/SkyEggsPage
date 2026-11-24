@@ -329,6 +329,43 @@ export function openDb(path) {
       removed_at INTEGER
     );
   `);
+  // ---------- Staff: ajustes, Discord, excusas y resultados por mes (2026-11-23) ----------
+  if (!cols("staff").includes("removal_due_at")) db.exec("ALTER TABLE staff ADD COLUMN removal_due_at INTEGER");
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_by TEXT, updated_at INTEGER NOT NULL
+    );
+    -- Ventanas de N minutos con al menos un mensaje del miembro en los canales elegidos.
+    CREATE TABLE IF NOT EXISTS staff_discord_windows (
+      discord_id TEXT NOT NULL, win INTEGER NOT NULL, day TEXT NOT NULL,
+      PRIMARY KEY (discord_id, win)
+    );
+    CREATE INDEX IF NOT EXISTS sdw_day ON staff_discord_windows(discord_id, day);
+    CREATE TABLE IF NOT EXISTS staff_discord_days (
+      day TEXT NOT NULL, discord_id TEXT NOT NULL, messages INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (day, discord_id)
+    );
+    CREATE TABLE IF NOT EXISTS discord_cursors (
+      channel_id TEXT PRIMARY KEY, last_id TEXT, name TEXT, updated_at INTEGER NOT NULL, error TEXT
+    );
+    CREATE TABLE IF NOT EXISTS staff_excuses (
+      id INTEGER PRIMARY KEY,
+      discord_id TEXT NOT NULL,
+      scope TEXT NOT NULL,            -- week | month
+      period TEXT NOT NULL,           -- lunes AAAA-MM-DD (semana) o AAAA-MM (mes)
+      reason TEXT NOT NULL, url TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',  -- pending | approved | rejected
+      created_at INTEGER NOT NULL,
+      reviewed_by TEXT, reviewed_id TEXT, reviewed_at INTEGER, review_note TEXT
+    );
+    CREATE INDEX IF NOT EXISTS staff_excuses_owner ON staff_excuses(discord_id, scope, period);
+    CREATE TABLE IF NOT EXISTS staff_month_results (
+      discord_id TEXT NOT NULL, month TEXT NOT NULL,
+      percent INTEGER NOT NULL, complete INTEGER NOT NULL, excused INTEGER NOT NULL DEFAULT 0, strike INTEGER NOT NULL DEFAULT 0,
+      evaluated_at INTEGER NOT NULL,
+      PRIMARY KEY (discord_id, month)
+    );
+  `);
   return db;
 }
 

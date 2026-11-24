@@ -1,6 +1,9 @@
 // Genera site/staff/index.html desde api/src/staffProgram.js (fuente única). Uso: node scripts/build-staff-page.mjs
 import { writeFileSync } from "node:fs";
 import { RANKS, TASKS, RULES } from "../api/src/staffProgram.js";
+import { defaultStaffSettings } from "../api/src/staffSettings.js";
+// Valores por defecto (el Admin puede cambiarlos en el panel; el panel siempre muestra los actuales).
+const D = defaultStaffSettings({ staff: { failMonthsToRemove: 2, warnDay: 20, graceDays: 3 } });
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const rankCards = RANKS.map((r, i) => `
           <article class="st-rank st-rank--${r.key}">
@@ -19,6 +22,7 @@ const cmdBlocks = RANKS.map((r) => `
           </details>`).join("");
 const taskRows = TASKS.map((t) => `
               <tr><th scope="row">${esc(t.name)}${t.optional ? " <span class=\"st-tag\">extra</span>" : ""}<span>${esc(t.desc)}</span></th>${RANKS.map((r) => `<td>${t.targets[r.key] ? `${t.targets[r.key]} ${esc(t.unit)}` : "—"}</td>`).join("")}<td>${t.track === "auto" ? "Automática" : "Con evidencia"}</td></tr>`).join("");
+// (las metas de arriba son las de por defecto)
 const html = `<!doctype html>
 <html lang="es">
 <head>
@@ -55,6 +59,7 @@ const html = `<!doctype html>
       <a href="#rangos">Rangos</a>
       <a href="#comandos">Comandos</a>
       <a href="#tareas">Tareas</a>
+      <a href="#cuota">Cuota</a>
       <a href="#preguntas">Preguntas</a>
     </nav>
     <a class="btn btn--yolk btn--sm" href="/creadores/panel/">Mi panel</a>
@@ -113,7 +118,7 @@ const html = `<!doctype html>
     <section class="st-tasks" id="tareas" aria-labelledby="tareas-title">
       <div class="wrap">
         <h2 class="section-title" id="tareas-title">Tareas del mes</h2>
-        <p class="section-lead">Para mantener el rango cumples las tareas de tu rango cada mes. Las automáticas las mide el juego y la página; para las demás subes capturas al panel y un rango superior las aprueba. Si pasan <strong>2 meses seguidos</strong> sin cumplirlas, sales del staff. El día 20 te avisamos si vas por debajo de la mitad.</p>
+        <p class="section-lead">Para mantener el rango cumples las tareas de tu rango cada mes. Las automáticas las mide el juego y la página; para las demás subes capturas al panel y un rango superior las aprueba. Si pasan <strong>2 meses seguidos</strong> sin cumplirlas, tienes 5 días para presentar una excusa; si no, sales del staff. El día 20 te avisamos si vas por debajo de la mitad.</p>
         <div class="st-table">
           <table>
             <thead><tr><th scope="col">Tarea</th>${RANKS.map((r) => `<th scope="col">${r.emoji} ${esc(r.name)}</th>`).join("")}<th scope="col">Cómo se mide</th></tr></thead>
@@ -121,6 +126,20 @@ const html = `<!doctype html>
             </tbody>
           </table>
         </div>
+      </div>
+    </section>
+
+    <section class="st-commands" id="cuota" aria-labelledby="cuota-title">
+      <div class="wrap">
+        <h2 class="section-title" id="cuota-title">Cuota semanal: juego + Discord</h2>
+        <p class="section-lead">Cada semana (lunes a domingo) sumas horas de conexión. Cuenta el tiempo en el juego <strong>y</strong> el tiempo que pasas ayudando en el Discord: cada rato en el que escribes en los canales del staff suma minutos. Si ayudas mucho en Discord, se te piden menos horas en el juego, pero siempre hay un mínimo en el juego.</p>
+        <div class="st-table">
+          <table>
+            <thead><tr><th scope="col">Rango</th><th scope="col">Horas por semana</th><th scope="col">Mínimo en el juego</th></tr></thead>
+            <tbody>${RANKS.map((r) => `<tr><th scope="row">${r.emoji} ${esc(r.name)}</th><td>${String(D.weekly[r.key].hours).replace(".", ",")} h</td><td>${String(D.weekly[r.key].minGameHours).replace(".", ",")} h</td></tr>`).join("")}</tbody>
+          </table>
+        </div>
+        <p class="section-lead">Ejemplo de un Helper: 2 h escribiendo en Discord + 1 h en el juego = semana cumplida. Los valores pueden cambiar: los actuales siempre están en tu panel.</p>
       </div>
     </section>
 
@@ -138,6 +157,8 @@ const html = `<!doctype html>
         <details><summary>¿Cómo se cuentan mis horas?</summary><p>El juego avisa a la página cada minuto quién del staff está conectado. Las horas en servicio cuentan cuando activas <code>;Duty</code>.</p></details>
         <details><summary>¿Qué cuenta como acción de moderación?</summary><p><code>;Warn</code>, <code>;Mute</code>, <code>;Kick</code>, <code>;Jail</code>, los baneos y los <code>;Report</code> que envías. Úsalos solo cuando hacen falta: los abusos se revisan.</p></details>
         <details><summary>¿Cómo subo de rango?</summary><p>Cumple tus tareas y pide el ascenso desde el panel. A Moderator Jr lo aprueba un Moderator o el Admin; a Moderator, solo el Admin.</p></details>
+        <details><summary>¿Cuenta lo que hago en Discord?</summary><p>Sí. Los mensajes en los canales del staff suman tiempo de conexión para tu cuota semanal y para los días activos. Solo se mira cuándo escribiste, nunca lo que escribiste.</p></details>
+        <details><summary>No voy a poder cumplir una semana o un mes, ¿pierdo el rango?</summary><p>No si avisas. Presenta una excusa en el panel (exámenes, viaje, enfermedad…). Si un rango superior la aprueba, esa semana cuenta como cumplida o ese mes no suma falta. Si llegas a 2 meses seguidos sin cumplir, tienes 5 días para presentar la excusa antes de salir del staff.</p></details>
         <details><summary>Me rechazaron, ¿puedo volver a aplicar?</summary><p>Sí, 14 días después del rechazo.</p></details>
         <details><summary>¿Cómo reporto a un jugador?</summary><p>Cualquier jugador puede escribir <code>;Report &lt;jugador&gt; &lt;motivo&gt;</code> en el juego. El reporte llega al panel del staff.</p></details>
       </div>

@@ -9,6 +9,10 @@ import * as C from "../src/creators.js";
 import * as S from "../src/staff.js";
 import { QUESTIONS } from "../src/staffProgram.js";
 import { rolesForStaff, diagnoseBot, explainDiscordError } from "../src/discord.js";
+import { getStaffSettings, saveStaffSettings } from "../src/staffSettings.js";
+import { recordDiscordMessages } from "../src/discordActivity.js";
+import { homeFeed } from "../src/home.js";
+import { weekOf } from "../src/creators.js";
 
 const ROLE = { admin: "1560889139375898775", moderator: "1563742282392543312", creator: "1561051688125730897" };
 const STAFF_ROLES = { Helper: "1563735797444771961", ModeratorJr: "1563736116300087337", Moderator: "1563736465522036736" };
@@ -97,7 +101,9 @@ test("actividad del juego, tareas con evidencias y revisión por rango superior"
   S.recordReport(db, { reporterId: 3001, reporterName: "Helper_Activo", targetId: 77, targetName: "Troll", reason: "insultos en el chat" }, now);
   let st = S.myStaffState(db, c, S.withStaffRoles(db, c, C.getDiscordUser(db, "30001"), now), now);
   const task = (k) => st.current.tasks.find((x) => x.key === k);
-  assert.equal(task("playtime").value, 2);
+  assert.equal(task("weeks").value, 0); // 2 h en la semana: no llega a la cuota de 3 h
+  assert.equal(st.week.gameHours, 2);
+  assert.equal(st.week.missingHours, 1);
   assert.equal(task("duty").value, 1);
   assert.equal(task("moderation").value, 4); // 3 sanciones + 1 reporte
   assert.equal(task("reviews"), undefined); // los Helpers no tienen esa tarea
@@ -126,12 +132,14 @@ test("ascensos: Helper → Jr lo aprueba un Moderator; Jr → Moderator solo el 
   play(db, c, 4001, "Sube_1", {}, t); user(db, "40001");
   const app = S.submitStaffApplication(db, "40001", { robloxUserId: 4001, answers: answers(), age13: true }, t);
   S.reviewStaffApplication(db, actor("adm", "admin"), { id: app.id, action: "approve" }, t);
-  const req1 = S.requestPromotion(db, actor("40001", "helper", "Helper"), { reason: "Cumplí mis tareas dos meses seguidos." }, t);
+  // Recién entrado no cumple los requisitos para pedirlo él mismo; un Moderator sí puede proponerlo.
+  assert.throws(() => S.requestPromotion(db, actor("40001", "helper", "Helper"), { reason: "Cumplí mis tareas dos meses seguidos." }, t, c), /not_eligible/);
+  const req1 = S.requestPromotion(db, actor("m", "moderator", "Moderator"), { discordId: "40001", reason: "Lo propongo: ayuda mucho en el Discord." }, t, c);
   assert.equal(req1.to, "ModeratorJr");
   const p1 = S.staffDashboard(db, c, t).promotions[0];
   S.reviewPromotion(db, actor("m", "moderator", "Moderator"), { id: p1.id, action: "approve" }, t);
   assert.equal(S.getStaff(db, "40001").rank, "ModeratorJr");
-  S.requestPromotion(db, actor("40001", "modjr", "ModeratorJr"), { reason: "Quiero ser Moderator, llevo meses." }, t);
+  S.requestPromotion(db, actor("adm", "admin"), { discordId: "40001", reason: "Quiero ser Moderator, llevo meses." }, t, c);
   const p2 = S.staffDashboard(db, c, t).promotions[0];
   assert.throws(() => S.reviewPromotion(db, actor("m", "moderator", "Moderator"), { id: p2.id, action: "approve" }, t), /admin_only/);
   const out = S.reviewPromotion(db, actor("adm", "admin"), { id: p2.id, action: "approve" }, t);
@@ -153,16 +161,98 @@ test("tareas: 2 meses seguidos sin cumplir sacan del staff; el primer mes incomp
   // Aviso el 20 de diciembre
   const w = S.evaluateStaff(db, c, Date.parse("2026-12-20T10:00:00-05:00"));
   assert.equal(w.warnings, 1);
-  // Diciembre incompleto → 1 strike; enero incompleto → fuera
+  // Diciembre incompleto → 1 falta; enero incompleto → aviso con 5 días para excusarse → fuera
   S.evaluateStaff(db, c, Date.parse("2027-01-04T10:00:00-05:00"));
   assert.equal(S.getStaff(db, "50001").strikes, 1);
-  const out = S.evaluateStaff(db, c, Date.parse("2027-02-04T10:00:00-05:00"));
+  const warn = S.evaluateStaff(db, c, Date.parse("2027-02-04T10:00:00-05:00"));
+  assert.equal(warn.removed, 0);
+  assert.equal(warn.removalWarnings, 1);
+  assert.ok(pend(db, 5001).includes("notice:staff_removal_warning:09/02/2027"));
+  const out = S.evaluateStaff(db, c, Date.parse("2027-02-09T11:00:00-05:00"));
   assert.equal(out.removed, 1);
   assert.equal(S.getStaff(db, "50001").rank, "None");
   assert.ok(pend(db, 5001).includes("staffset:None"));
   assert.ok(pend(db, 5001).includes("notice:staff_removed:tasks"));
   // Puede volver a aplicar
   assert.ok(S.submitStaffApplication(db, "50001", { robloxUserId: 5001, answers: answers(), age13: true }, Date.parse("2027-02-05T10:00:00-05:00")).ok);
+});
+
+test("cuota semanal: Discord suma horas, con un mínimo en el juego; ajustes del Admin", () => {
+  const db = openDb(":memory:"); const c = cfg(); const t = Date.parse("2026-11-23T09:00:00-05:00"); // lunes
+  play(db, c, 6001, "Discordero", {}, t); user(db, "60001");
+  const app = S.submitStaffApplication(db, "60001", { robloxUserId: 6001, answers: answers(), age13: true }, t);
+  S.reviewStaffApplication(db, actor("adm", "admin"), { id: app.id, action: "approve" }, t);
+  const settings = getStaffSettings(db, c);
+  // 30 min en el juego
+  let now = t;
+  for (let i = 0; i < 30; i++) { now += 60_000; play(db, c, 6001, "Discordero", { staffTier: 1 }, now); }
+  // 3 h de mensajes en Discord (un mensaje cada 5 min) y mensajes de alguien que no es staff
+  const msgs = [];
+  for (let i = 0; i < 36; i++) msgs.push({ id: String(1e17 + i), author: { id: "60001" }, timestamp: new Date(t + 3_600_000 + i * 5 * 60_000).toISOString() });
+  msgs.push({ id: "1", author: { id: "99999" }, timestamp: new Date(t).toISOString() }, { id: "2", author: { id: "60001", bot: true }, timestamp: new Date(t).toISOString() });
+  assert.equal(recordDiscordMessages(db, settings, msgs), 36);
+  const s = S.getStaff(db, "60001");
+  let w = S.weekStatus(db, settings, s, weekOf(t), now);
+  assert.equal(w.discordHours, 2); // tope diario de 120 min
+  assert.equal(w.gameHours, 0.5);
+  assert.equal(w.requiredGameHours, 1); // 3 h − 2 h de Discord = 1 h (y el mínimo es 1 h)
+  assert.equal(w.met, false);
+  for (let i = 0; i < 31; i++) { now += 60_000; play(db, c, 6001, "Discordero", { staffTier: 1 }, now); }
+  w = S.weekStatus(db, settings, s, weekOf(t), now);
+  assert.equal(w.met, true);
+  // El Admin sube la cuota del Helper y el peso de Discord: deja de cumplir
+  assert.throws(() => saveStaffSettings(db, c, actor("m", "moderator", "Moderator"), { settings: { weekly: { Helper: { hours: 6 } } } }), /admin_only/);
+  assert.throws(() => saveStaffSettings(db, c, actor("adm", "admin"), { settings: { weekly: { Helper: { hours: 900 } } } }), /bad_settings/);
+  saveStaffSettings(db, c, actor("adm", "admin"), { settings: { weekly: { Helper: { hours: 6, minGameHours: 2 } }, discord: { channels: "123456789012345678" }, targets: { invites: { Helper: 5 } } } });
+  const s2 = getStaffSettings(db, c);
+  assert.equal(s2.weekly.Helper.hours, 6);
+  assert.equal(s2.targets.invites.Helper, 5);
+  assert.deepEqual(s2.discord.channels, ["123456789012345678"]);
+  assert.equal(S.weekStatus(db, s2, s, weekOf(t), now).met, false);
+  assert.equal(C.auditList(db, 5).some((a) => a.action === "staff.settings"), true);
+  // Días activos: los de Discord cuentan
+  const p = S.taskProgress(db, s, "2026-11", s2);
+  assert.equal(p.tasks.find((x) => x.key === "days").value, 1);
+  assert.equal(p.tasks.find((x) => x.key === "invites").target, 5);
+});
+
+test("excusas: quitan la falta y cancelan la salida; inicio con prioridades por rol", () => {
+  const db = openDb(":memory:"); const c = cfg(); const t = Date.parse("2026-10-20T10:00:00-05:00");
+  play(db, c, 7001, "Viajero", {}, t); user(db, "70001");
+  const app = S.submitStaffApplication(db, "70001", { robloxUserId: 7001, answers: answers(), age13: true }, t);
+  S.reviewStaffApplication(db, actor("adm", "admin"), { id: app.id, action: "approve" }, t);
+  S.evaluateStaff(db, c, Date.parse("2026-12-04T10:00:00-05:00")); // noviembre: 1 falta
+  S.evaluateStaff(db, c, Date.parse("2027-01-04T10:00:00-05:00")); // diciembre: 2 faltas → plazo
+  let s = S.getStaff(db, "70001");
+  assert.equal(s.strikes, 2);
+  assert.ok(s.removal_due_at);
+  const now = Date.parse("2027-01-05T10:00:00-05:00");
+  // El inicio le avisa primero que va a salir
+  const u = S.withStaffRoles(db, c, C.getDiscordUser(db, "70001"), now);
+  const feed = homeFeed(db, c, u, actor("70001", "helper", "Helper"), now);
+  assert.equal(feed.items[0].page, "staff-excusas");
+  assert.equal(feed.items[0].priority, 1);
+  assert.throws(() => S.submitExcuse(db, c, "70001", { scope: "month", which: "previous", reason: "corto" }, now), /reason_short/);
+  const ex = S.submitExcuse(db, c, "70001", { scope: "month", which: "previous", reason: "Estuve de viaje sin internet todo diciembre con mi familia." }, now);
+  assert.equal(ex.period, "2026-12");
+  // No sale mientras la excusa está pendiente, aunque venza el plazo
+  assert.equal(S.evaluateStaff(db, c, Date.parse("2027-01-10T10:00:00-05:00")).removed, 0);
+  // El Moderator ve la excusa como urgente en su inicio y la aprueba
+  const mod = actor("m1", "moderator", "Moderator");
+  user(db, "m1", { moderator: true });
+  const mfeed = homeFeed(db, c, S.withStaffRoles(db, c, C.getDiscordUser(db, "m1"), now), mod, now);
+  assert.equal(mfeed.items.find((i) => i.page === "staff-excusas-revision").priority, 1);
+  assert.throws(() => S.reviewExcuse(db, c, actor("h", "helper", "Helper"), { id: ex.id, action: "approve" }, now), /forbidden/);
+  S.reviewExcuse(db, c, mod, { id: ex.id, action: "approve" }, now);
+  s = S.getStaff(db, "70001");
+  assert.equal(s.strikes, 1);
+  assert.equal(s.removal_due_at, null);
+  assert.equal(S.evaluateStaff(db, c, Date.parse("2027-01-11T10:00:00-05:00")).removed, 0);
+  assert.equal(S.getStaff(db, "70001").rank, "Helper");
+  // Semana excusada cuenta como cumplida
+  const wk = S.submitExcuse(db, c, "70001", { scope: "week", reason: "Exámenes finales toda la semana, vuelvo el lunes." }, now);
+  S.reviewExcuse(db, c, mod, { id: wk.id, action: "approve" }, now);
+  assert.equal(S.weekStatus(db, getStaffSettings(db, c), S.getStaff(db, "70001"), weekOf(now), now).met, true);
 });
 
 test("diagnóstico del bot: explica el 404 de Discord", async () => {

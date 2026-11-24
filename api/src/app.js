@@ -8,6 +8,9 @@ import { safeEqual, verifyPassword, createSession, checkSession, getSession, del
 import { discordEnabled, authorizeUrl, fetchDiscordIdentity, rolesFrom, notifyMods, botEnabled, rolesForTier, rolesForStaff, setMemberRoles, diagnoseBot, listMembersWithRoles } from "./discord.js";
 import * as S from "./staff.js";
 import { publicStaffProgram } from "./staffProgram.js";
+import { getStaffSettings, staffSettingsInfo, saveStaffSettings, resetStaffSettings } from "./staffSettings.js";
+import { pollDiscordChannels, discordChannelsStatus } from "./discordActivity.js";
+import { homeFeed } from "./home.js";
 import { evaluateCreators, setCreatorTier, legacyList, noticeList } from "./lifecycle.js";
 import { publicCreators, clearPublicCache, creatorsDashboard, creatorDetail } from "./insights.js";
 import { LEVEL_KEYS } from "./program.js";
@@ -29,7 +32,7 @@ export class Limiter {
   }
 }
 
-class HttpError extends Error { constructor(status, code) { super(code); this.status = status; this.code = code; } }
+class HttpError extends Error { constructor(status, code, field = null) { super(code); this.status = status; this.code = code; this.field = field; } }
 
 // Lee las vistas de una evidencia y guarda el resultado (no lanza).
 export async function probeEvidence(db, cfg, id, url, probe, log = console, now = Date.now()) {
@@ -58,7 +61,7 @@ export function startViewsTracker({ db, cfg, probe = probeViews, log = console }
   };
   const timer = setInterval(tick, 15 * 60_000);
   setTimeout(tick, 30_000);
-  return () => clearInterval(timer);
+  return () => { clearInterval(timer); clearInterval(pollTimer); };
 }
 
 // Pone/quita los roles de Discord de cada cambio de rango (si hay bot). Nunca lanza.
@@ -84,6 +87,16 @@ export async function runRoleJobs(db, cfg, jobs, fetchImpl = fetch, log = consol
 export function startLifecycle({ db, cfg, fetchImpl = fetch, log = console }) {
   let running = false;
   let lastDiscordSync = 0;
+  // Actividad del staff en Discord: cada 5 min lee los canales elegidos por el Admin.
+  let polling = false;
+  const pollTimer = setInterval(async () => {
+    if (polling || !botEnabled(cfg)) return;
+    polling = true;
+    try {
+      const out = await pollDiscordChannels(db, cfg, getStaffSettings(db, cfg), fetchImpl);
+      if (out.errors.length) log.warn(`[staff] Discord: ${out.errors.join(" | ")}`);
+    } catch (e) { log.error("[staff] Discord", e); } finally { polling = false; }
+  }, 5 * 60_000);
   const tick = async () => {
     if (running) return;
     running = true;
@@ -96,7 +109,7 @@ export function startLifecycle({ db, cfg, fetchImpl = fetch, log = console }) {
       await runRoleJobs(db, cfg, out.roleJobs, fetchImpl, log);
       // Staff: cierre de mes, avisos y (cada 30 min) roles de Discord del staff.
       const st = S.evaluateStaff(db, cfg);
-      if (st.removed || st.warnings) log.info(`[staff] ${st.removed} fuera por tareas, ${st.warnings} aviso(s)`);
+      if (st.removed || st.warnings || st.removalWarnings) log.info(`[staff] ${st.removed} fuera por tareas, ${st.removalWarnings} con plazo para excusa, ${st.warnings} aviso(s)`);
       await runRoleJobs(db, cfg, st.roleJobs, fetchImpl, log);
       if (botEnabled(cfg) && Date.now() - lastDiscordSync > 30 * 60_000) {
         lastDiscordSync = Date.now();
@@ -207,7 +220,7 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
     return u;
   }
   // Errores de reglas del programa → 400/403/404 con su código.
-  const run = (fn) => { try { return fn(); } catch (e) { if (e instanceof C.Fail) throw new HttpError(e.status, e.code); throw e; } };
+  const run = (fn) => { try { return fn(); } catch (e) { if (e instanceof C.Fail) throw new HttpError(e.status, e.code, e.field || null); throw e; } };
 
   async function readImage(req, maxBytes = 5 * 1024 * 1024) {
     const type = String(req.headers["content-type"] || "").split(";")[0].trim();
@@ -473,7 +486,23 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
     },
 
     // ----- Programa de staff -----
-    "GET /api/staff/program": async () => publicStaffProgram(cfg),
+    "GET /api/staff/program": async () => publicStaffProgram(cfg, getStaffSettings(db, cfg)),
+    // Inicio del panel: pendientes por prioridad y accesos rápidos según el rol.
+    "GET /api/home": async (req) => {
+      const u = requireUser(req);
+      const r = u.roles;
+      const actor = { id: u.id, name: u.globalName ? `${u.globalName} (@${u.username})` : `@${u.username}`, role: r.admin ? "admin" : r.moderator ? "moderator" : r.modjr ? "modjr" : r.helper ? "helper" : "user", staffRank: r.staffRank };
+      return homeFeed(db, cfg, u, actor);
+    },
+    "POST /api/staff/excuse": async (req) => {
+      checkOrigin(req);
+      const u = requireUser(req);
+      if (!limits.creator.take(u.id)) throw new HttpError(429, "slow_down");
+      const body = await readJson(req, 4096);
+      const out = run(() => S.submitExcuse(db, cfg, u.id, body));
+      notifyMods(cfg, `📝 @${u.username} presentó una excusa (${out.scope === "week" ? "semana del" : "mes"} ${out.period}): ${cfg.siteUrl}/creadores/panel/#staff-excusas-revision`, fetchImpl);
+      return out;
+    },
     "GET /api/staff/me": async (req) => { const u = requireUser(req); return S.myStaffState(db, cfg, u); },
     "POST /api/staff/apply": async (req) => {
       checkOrigin(req);
@@ -504,7 +533,7 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
       checkOrigin(req);
       const a = staffMember(req, "helper");
       const body = await readJson(req, 2048);
-      return run(() => S.requestPromotion(db, a, body));
+      return run(() => S.requestPromotion(db, a, body, Date.now(), cfg));
     },
 
     // ----- Moderación del staff -----
@@ -536,6 +565,27 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
       if (out.job) await runRoleJobs(db, cfg, [out.job], fetchImpl, log);
       return { ok: true };
     },
+    "GET /api/mod/staff/excuses": async (req) => { const a = staffMember(req, "modjr"); return { excuses: S.excuseQueue(db, a) }; },
+    "POST /api/mod/staff/excuse": async (req) => { checkOrigin(req); const a = staffMember(req, "modjr"); const b = await readJson(req, 2048); return run(() => tx(db, () => S.reviewExcuse(db, cfg, a, b))); },
+    // Ajustes del staff (solo el Admin los cambia; el resto del staff puede verlos).
+    "GET /api/mod/staff/settings": async (req) => {
+      staffMember(req, "modjr");
+      const s = getStaffSettings(db, cfg);
+      return { ...staffSettingsInfo(db, cfg), channels: discordChannelsStatus(db, s), bot: botEnabled(cfg) };
+    },
+    "POST /api/mod/staff/settings": async (req) => {
+      checkOrigin(req); const a = requireAdmin(req); const b = await readJson(req, 16_384);
+      const out = run(() => (b.reset ? resetStaffSettings(db, cfg, a) : saveStaffSettings(db, cfg, a, b)));
+      return { ...out, channels: discordChannelsStatus(db, out.settings) };
+    },
+    // Lee ya los canales de Discord (para probar la configuración).
+    "POST /api/mod/staff/discord-poll": async (req) => {
+      checkOrigin(req); requireAdmin(req);
+      const s = getStaffSettings(db, cfg);
+      if (!botEnabled(cfg)) throw new HttpError(400, "no_bot");
+      const out = await pollDiscordChannels(db, cfg, s, fetchImpl);
+      return { ...out, channels: discordChannelsStatus(db, s) };
+    },
     "GET /api/mod/reports": async (req, url) => { staffMember(req, "modjr"); return { reports: S.reportsList(db, url.searchParams.get("status") || "open") }; },
     "POST /api/mod/report": async (req) => { checkOrigin(req); const a = staffMember(req, "modjr"); const b = await readJson(req, 2048); return run(() => S.reviewReport(db, a, b)); },
     // Diagnóstico del bot de Discord: qué falta para poner roles (y si un usuario está en el servidor).
@@ -564,6 +614,7 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
       const staffCounts = {
         reports: db.prepare("SELECT COUNT(*) AS n FROM reports WHERE status = 'open'").get().n,
         evidence: S.staffEvidenceQueue(db, a).length,
+        excuses: S.excuseQueue(db, a).length,
         applications: mod ? db.prepare("SELECT COUNT(*) AS n FROM staff_applications WHERE status IN ('pending','contacted')").get().n : 0,
         promotions: mod ? db.prepare("SELECT COUNT(*) AS n FROM staff_promotions WHERE status = 'pending'").get().n : 0,
         links: mod ? db.prepare("SELECT COUNT(*) AS n FROM staff WHERE link_status = 'pending'").get().n : 0,
@@ -677,7 +728,7 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
       if (out && out.status && out.body) send(res, out.status, out.body, out.headers);
       else send(res, 200, out);
     } catch (err) {
-      if (err instanceof HttpError) return send(res, err.status, { error: err.code });
+      if (err instanceof HttpError) return send(res, err.status, err.field ? { error: err.code, field: err.field } : { error: err.code });
       log.error("[api]", err);
       send(res, 500, { error: "server_error" });
     }

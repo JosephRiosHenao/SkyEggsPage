@@ -73,12 +73,12 @@ export const RANK_BY_KEY = Object.fromEntries(RANKS.map((r) => [r.key, r]));
 // "evidence" (el staff sube pruebas y un rango superior aprueba cuánto suma).
 // targets[rango] = meta del mes (0 = no se pide en ese rango). optional = suma, pero no es obligatoria.
 export const TASKS = [
-  { key: "playtime", name: "Horas en el juego", unit: "h", track: "auto", targets: { Helper: 10, ModeratorJr: 15, Moderator: 20 },
-    desc: "Horas conectado al juego en el mes (lo mide el juego)." },
+  { key: "weeks", name: "Semanas con la cuota cumplida", unit: "semanas", track: "auto", targets: { Helper: 3, ModeratorJr: 3, Moderator: 3 },
+    desc: "Semanas (lunes a domingo) en las que llegaste a tu cuota de conexión: horas en el juego + actividad en el Discord, con un mínimo en el juego." },
   { key: "duty", name: "Horas en servicio", unit: "h", track: "auto", targets: { Helper: 4, ModeratorJr: 6, Moderator: 8 },
     desc: "Horas con ;Duty activado ayudando en los servidores." },
   { key: "days", name: "Días activos", unit: "días", track: "auto", targets: { Helper: 8, ModeratorJr: 10, Moderator: 12 },
-    desc: "Días distintos con al menos 10 minutos en el juego." },
+    desc: "Días distintos con al menos 10 minutos en el juego o escribiendo en el Discord." },
   { key: "moderation", name: "Acciones de moderación", unit: "acciones", track: "auto", targets: { Helper: 5, ModeratorJr: 10, Moderator: 15 },
     desc: "Warn, Mute, Kick, Jail, baneos y ;Report usados en el juego." },
   { key: "reviews", name: "Revisiones en el panel", unit: "revisiones", track: "auto", targets: { Helper: 0, ModeratorJr: 8, Moderator: 15 },
@@ -129,12 +129,17 @@ export const RULES = [
   "Nada de usar comandos para ventaja propia, trolear o mover la economía.",
   "Todo queda registrado (juego y página): los abusos se revisan y se sancionan.",
   "Los casos graves o dudosos se escalan al rango superior por ;sc o el canal de staff.",
+  "¿No puedes cumplir una semana o un mes (exámenes, viaje, enfermedad)? Presenta una excusa en el panel: si la aprueban, no pierdes el rango.",
 ];
 
-export function publicStaffProgram(cfg) {
+// settings = ajustes del Admin (staffSettings.js): metas, cuota semanal, Discord y reglas.
+export function publicStaffProgram(cfg, settings = null) {
+  const tasks = settings ? TASKS.map((t) => ({ ...t, targets: { ...t.targets, ...settings.targets[t.key] } })) : TASKS;
   return {
-    ranks: RANKS, tasks: TASKS, questions: QUESTIONS, rules: RULES,
-    linkDeadline: cfg.staff.linkDeadline, failMonthsToRemove: cfg.staff.failMonthsToRemove,
+    ranks: RANKS, tasks, questions: QUESTIONS, rules: RULES,
+    weekly: settings?.weekly || null, discordCredit: settings ? { weight: settings.discord.weight, windowMinutes: settings.discord.windowMinutes, dailyCapMinutes: settings.discord.dailyCapMinutes, enabled: settings.discord.channels.length > 0 } : null,
+    promotionRules: settings?.promotion || null, excuseDays: settings?.rules.excuseDays ?? 5,
+    linkDeadline: cfg.staff.linkDeadline, failMonthsToRemove: settings?.rules.failMonthsToRemove ?? cfg.staff.failMonthsToRemove,
     path: ["Helper", "ModeratorJr", "Moderator"],
     promotions: { ModeratorJr: "lo aprueba un Moderator o el Admin", Moderator: "solo lo aprueba el Admin" },
   };

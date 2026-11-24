@@ -66,6 +66,14 @@
     bad_rank: "Ese rango no existe.",
     same_rank: "Ya tiene ese rango.",
     members_intent: "No se pudo leer la lista de Discord: activa «Server Members Intent» en el bot.",
+    not_eligible: "Todavía no cumples los requisitos para pedir el ascenso. Te falta:",
+    request_short: "Explica un poco más (mínimo 10 letras).",
+    bad_scope: "Elige si la excusa es de una semana o de un mes.",
+    excuse_late: "Ya pasó el plazo para excusar el mes pasado.",
+    reason_short: "Cuenta el motivo con un poco más de detalle (mínimo 15 letras).",
+    excuse_limit: "Ya usaste todas las excusas aprobadas de este año.",
+    bad_settings: "Hay un valor fuera de rango en:",
+    no_bot: "Falta configurar el bot de Discord (DISCORD_BOT_TOKEN).",
     bad_tier: "Ese rango no existe.",
     same_tier: "Ya tiene ese rango.",
     must_reapply: "Saliste del programa: envía una solicitud nueva en la pestaña Aplicar.",
@@ -114,7 +122,7 @@
       : { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) };
     const res = await fetch(path, { credentials: "same-origin", ...init });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw Object.assign(new Error(data.error || "error"), { status: res.status });
+    if (!res.ok) throw Object.assign(new Error(data.error || "error"), { status: res.status, field: data.field || null });
     return data;
   }
   function flash(text, kind = "ok") {
@@ -123,7 +131,12 @@
     box.scrollIntoView({ block: "nearest", behavior: "smooth" });
     if (kind === "ok") setTimeout(() => box.remove(), 6000);
   }
-  const errText = (e) => ERRORS[e.message] || "Algo salió mal. Inténtalo de nuevo.";
+  const errText = (e) => {
+    const base = ERRORS[e.message] || "Algo salió mal. Inténtalo de nuevo.";
+    if (!e.field) return base;
+    const q = staffProgram?.questions?.find((x) => x.key === e.field);
+    return `${base} (${q ? q.label : e.field})`;
+  };
   // Botón que llama a la API, se desactiva mientras tanto y avisa del resultado.
   async function act(btn, fn, okText, after) {
     btn.disabled = true;
@@ -166,6 +179,7 @@
       { title: "Mi staff", show: Boolean(staffRank()), items: [
         !roles().staffLinked && ["staff-vincular", "Vincular mi cuenta", "🔗"],
         roles().staffLinked && ["staff-tareas", "Mis tareas del mes", "✅"],
+        roles().staffLinked && ["staff-excusas", "Excusas", "📝"],
         ["staff-guia", "Comandos y funciones", "🛡️"]] },
       { title: "Moderación de creadores", show: isMod(), items: [
         ["mod-solicitudes", "Solicitudes", "📝", len(q.applications)], ["mod-vinculos", "Vinculaciones", "🔗", len(q.links)],
@@ -174,11 +188,13 @@
         ["mod-creadores", "Creadores y métricas", "📊"], ["mod-avisos", "Avisos al buzón", "📬"], ["mod-antiguos", "Creadores antiguos", "⏳"]] },
       { title: "Staff", show: isModJr(), items: [
         ["staff-reportes", "Reportes del juego", "📣", st.reports], ["staff-revision", "Tareas por revisar", "🧾", st.evidence],
+        ["staff-excusas-revision", "Excusas por revisar", "📝", st.excuses],
         ["staff-equipo", "Equipo y métricas", "📈"],
         isMod() && ["staff-solicitudes", "Solicitudes de Helper", "🛟", (st.applications || 0) + (st.links || 0)],
         isMod() && ["staff-ascensos", "Ascensos", "⬆️", st.promotions], isMod() && ["staff-antiguos", "Staff antiguo", "⏳"],
         !staffRank() && ["staff-guia", "Guía del staff", "🛡️"]] },
-      { title: "Administración", show: isMod(), items: [isAdmin() && ["admin-suerte", "Prueba tu suerte", "🥚"], ["admin-discord", "Bot de Discord", "🤖"], ["mod-registro", "Registro", "🗂️"]] },
+      { title: "Administración", show: isModJr(), items: [isAdmin() && ["admin-staff-ajustes", "Ajustes del staff", "⚙️"], !isAdmin() && ["admin-staff-ajustes", "Reglas del staff", "⚙️"],
+        isAdmin() && ["admin-suerte", "Prueba tu suerte", "🥚"], isMod() && ["admin-discord", "Bot de Discord", "🤖"], isMod() && ["mod-registro", "Registro", "🗂️"]] },
     ].filter((g) => g.show !== false).map((g) => ({ ...g, items: g.items.filter(Boolean) })).filter((g) => g.items.length);
   }
   const allowedKeys = () => navGroups().flatMap((g) => g.items.map((i) => i[0]));
@@ -199,7 +215,7 @@
     const allowed = allowedKeys();
     // Enlaces viejos (#moderacion) → primera página de moderación.
     if (key === "moderacion") key = "mod-solicitudes";
-    if (!allowed.includes(key)) key = allowed.includes("metas") ? "metas" : allowed.includes("staff-tareas") ? "staff-tareas" : "inicio";
+    if (!allowed.includes(key)) key = "inicio";
     current = key;
     renderNav();
     $("page-title").textContent = titleOf(key);
@@ -225,7 +241,8 @@
   const RENDER = {
     async inicio(s) {
       const u = me.user;
-      const box = el("div", { class: "box" }, el("h2", {}, `Hola, ${u.globalName || u.username}`));
+      const dash = await homeDashboard(u);
+      const box = el("div", { class: "box" }, el("h2", {}, isCreator() || !staffRank() ? "Tus primeros pasos" : "Tu cuenta"));
       if (!u.roles.inGuild) {
         box.append(el("div", { class: "notice" }, "No estás en el Discord de Sky Eggs. Únete y vuelve a entrar para que podamos ver tus roles."),
           el("p", {}, el("a", { class: "btn btn--discord", href: "https://discord.gg/sTgtR7KdGQ", target: "_blank", rel: "noopener" }, "Unirme al Discord")));
@@ -250,7 +267,6 @@
         add(Boolean(a), "Envía tu solicitud", a ? `Estado: ${st}` : "Cuéntanos dónde publicas y deja tus redes.", a ? null : "aplicar");
         add(a?.status === "approved", "Recibe el rol de Content Creator", "Te lo da un moderador por Discord. Después sal y vuelve a entrar aquí.");
       }
-      if (isMod()) add(true, roles().admin ? "Eres el admin" : "Eres moderador", "Revisa la pestaña Moderación y la Guía para moderadores.", "moderacion");
       box.append(steps);
       const extra = [];
       if (isCreator() && creator?.link?.status === "approved") {
@@ -264,7 +280,8 @@
           el("ul", { class: "list" }, ...creator.notices.map((x) => el("li", { class: "item" },
             el("div", { class: "item__head" }, el("span", { class: "item__title" }, noticeText(x.kind, x.param)), el("span", { class: "small muted" }, when(x.createdAt))))))));
       }
-      s.replaceChildren(box, ...extra);
+      const showSteps = isCreator() || (!staffRank() && !isMod());
+      s.replaceChildren(...dash, ...(showSteps ? [box] : []), ...extra);
     },
 
     async aplicar(s) {
@@ -498,6 +515,9 @@
     "staff-aplicar": async (s) => staffApply(s),
     "staff-vincular": async (s) => staffLink(s),
     "staff-tareas": async (s) => staffTasks(s),
+    "staff-excusas": async (s) => staffExcuses(s),
+    "staff-excusas-revision": modPage((b) => staffExcuseReview(b), "Excusas de rangos inferiores. Si apruebas la de un mes que ya cerró sin cumplir, se le quita esa falta (y la salida, si estaba pendiente)."),
+    "admin-staff-ajustes": async (s) => adminStaffSettings(s),
     "staff-guia": async (s) => staffGuide(s),
     "staff-reportes": modPage((b) => staffReports(b), "Reportes enviados desde el juego con ;Report. Resuélvelos con una nota de lo que hiciste."),
     "staff-revision": modPage((b) => staffReview(b), "Evidencias de tareas del staff de rango inferior al tuyo."),
@@ -959,7 +979,7 @@
       el("div", { class: "hero-card__stats" },
         tile(String(st.current.activity.actions), "comandos este mes"), tile(String(st.current.activity.reportsFiled), "reportes enviados"),
         tile(String(st.staff.strikes), "meses sin cumplir", st.staff.strikes ? "warn" : null)));
-    const warn = st.staff.strikes ? el("div", { class: "notice notice--bad" }, `Tienes ${st.staff.strikes} mes sin cumplir tus tareas. Con ${staffProgram.failMonthsToRemove} seguidos sales del staff.`) : null;
+    const warn = st.staff.strikes && !st.removalDueAt ? el("div", { class: "notice notice--bad" }, `Tienes ${st.staff.strikes} mes sin cumplir tus tareas. Con ${staffProgram.failMonthsToRemove} seguidos sales del staff.`) : null;
     const form = el("form", { class: "form" },
       el("div", { class: "row" },
         el("label", {}, "Tarea", el("select", { name: "task" }, ...evTasks.map((t) => el("option", { value: t.key }, t.name)))),
@@ -991,10 +1011,13 @@
     else if (pending) promo.append(el("p", {}, `Pediste subir a ${RANK_NAME[pending.toRank]}: `, pill("pending", "en revisión")));
     else {
       const reason = el("textarea", { maxlength: "600", rows: "2", placeholder: "Cuenta por qué estás listo (tareas cumplidas, ayudas, eventos…)" });
-      promo.append(el("p", { class: "muted" }, `Siguiente rango: ${RANK_NAME[next]} (${staffProgram.promotions[next]}).`), reason,
-        el("div", { class: "form-actions" }, btn("Pedir ascenso", "btn--green", (b) => act(b, () => api("/api/staff/promotion", { reason: reason.value }), "Ascenso pedido.", () => show("staff-tareas")))));
+      promo.append(el("p", { class: "muted" }, `Siguiente rango: ${RANK_NAME[next]} (${staffProgram.promotions[next]}).`), checksList(st.promotion.checks));
+      if (st.promotion.eligible) promo.append(reason, el("div", { class: "form-actions" }, btn("Pedir ascenso", "btn--green", (b) => act(b, () => api("/api/staff/promotion", { reason: reason.value }), "Ascenso pedido.", () => show("staff-tareas")))));
+      else promo.append(el("p", { class: "small muted" }, "Cuando cumplas todo podrás pedirlo aquí. Un rango superior también puede proponerte."));
     }
-    s.replaceChildren(...[head, warn, progressBlock(st.current, `Tareas de ${st.current.month}`),
+    if (st.removalDueAt) s.dataset.removal = "1";
+    const removal = st.removalDueAt ? el("div", { class: "notice notice--bad" }, `No cumpliste ${st.staff.strikes} meses seguidos: sales del staff el ${new Date(st.removalDueAt).toLocaleDateString("es-CO", { dateStyle: "long" })} si no presentas una excusa. `, el("a", { href: "#staff-excusas" }, "Presentar excusa →")) : null;
+    s.replaceChildren(...[head, removal, warn, weekCard(st.week, "Cuota de esta semana"), weeksBlock(st.current), progressBlock(st.current, `Tareas de ${st.current.month}`),
       el("div", { class: "box" }, el("h2", {}, "Subir evidencia"), el("p", { class: "small muted" }, "Las horas, días y acciones de moderación se miden solas desde el juego (usa ;Duty cuando ayudes). Para el resto sube capturas."), form),
       el("div", { class: "box" }, el("h2", {}, "Mis evidencias"), evList), promo,
       st.previous.tasks.length ? progressBlock(st.previous, `Mes pasado (${st.previous.month})`) : null].filter(Boolean));
@@ -1075,7 +1098,9 @@
       tile(`${String(s.hoursWeek).replace(".", ",")} h`, "jugadas en 7 días"), tile(`${s.complete}/${s.total}`, `cumplieron ${d.month}`),
       tile(String(s.atRisk), "por debajo del 50 %", s.atRisk ? "warn" : null), tile(String(s.reportsOpen), "reportes abiertos", s.reportsOpen ? "warn" : null),
       tile(s.reportAvgHours == null ? "—" : `${String(s.reportAvgHours).replace(".", ",")} h`, "respuesta media a reportes"),
-      tile(String(s.legacyPending), "staff antiguo sin vincular", s.legacyPending ? "warn" : null));
+      tile(String(s.legacyPending), "staff antiguo sin vincular", s.legacyPending ? "warn" : null),
+      tile(`${s.weekMet}/${s.total}`, "con la cuota de esta semana"), tile(`${h1(s.discordHoursMonth)} h`, "de actividad en Discord este mes"),
+      tile(String(s.removalsPending), "con salida pendiente", s.removalsPending ? "warn" : null));
     const ranks = el("div", { class: "tiers" }, ...staffProgram.ranks.map((r) => { const c = el("span", { class: "tierchip" }, `${r.emoji} ${r.name}: ${s.byRank[r.key] || 0}`); c.style.setProperty("--tier", r.color); return c; }));
     const isA = isAdmin();
     const rows = d.members.map((m) => {
@@ -1085,10 +1110,12 @@
         el("td", {}, el("span", { class: `dot ${m.online ? "dot--on" : ""}`, title: m.online ? "Conectado" : "Desconectado" }), m.discord, m.roblox ? el("div", { class: "small muted" }, link(`https://www.roblox.com/users/${m.roblox.userId}/profile`, `@${m.roblox.name}`)) : null),
         el("td", {}, rankPill(m.rank), m.gameRank && m.gameRank !== m.rank ? el("div", { class: "small muted" }, `En el juego: ${RANK_NAME[m.gameRank]}`) : null, m.linkStatus === "pending" ? el("div", { class: "small muted" }, "vínculo pendiente") : null),
         el("td", {}, m.online ? "ahora" : ago(m.lastSeen)),
-        el("td", {}, hours(m.hoursToday), el("div", { class: "small muted" }, `${hours(m.hoursWeek)} semana · ${hours(m.dutyWeek)} servicio`)),
+        el("td", {}, hours(m.hoursToday), el("div", { class: "small muted" }, `${hours(m.hoursWeek)} 7 días · ${hours(m.dutyWeek)} servicio`)),
+        el("td", {}, m.week ? el("div", {}, m.week.met ? pill("approved", m.week.excused ? "Excusada" : "Cumplida") : pill("pending", `${h1(m.week.totalHours)}/${h1(m.week.targetHours)} h`),
+          el("div", { class: "small muted" }, `${h1(m.week.gameHours)} juego · ${h1(m.week.discordHours)} Discord`)) : "—"),
         el("td", {}, m.progress ? el("div", {}, el("div", { class: "meter meter--sm" }, el("div", { class: "meter__fill", "data-w": m.progress.percent })), el("span", { class: "small" }, `${m.progress.percent}% · ${m.progress.done}/${m.progress.required}`)) : "—"),
-        el("td", {}, m.progress ? `${m.progress.activity.actions} cmds · ${m.progress.activity.reportsFiled} rep.` : "—"),
-        el("td", {}, String(m.strikes || 0)),
+        el("td", {}, m.progress ? `${m.progress.activity.actions} cmds · ${m.progress.activity.reportsFiled} rep. · ${m.progress.activity.discordMessages} msj. Discord` : "—"),
+        el("td", {}, String(m.strikes || 0), m.removalDueAt ? el("div", { class: "small bad-text" }, `sale el ${new Date(m.removalDueAt).toLocaleDateString("es-CO")}`) : null),
         el("td", {}, canEdit ? el("div", { class: "inline" }, sel, btn("Guardar", "btn--white", (b) => {
           if (sel.value === m.rank) return;
           if (sel.value === "None" && !confirm("¿Sacarlo del staff? Pierde el rango en el juego y en Discord.")) return;
@@ -1096,7 +1123,7 @@
         })) : ""));
     });
     const table = rows.length ? el("div", { class: "scrollx" }, el("table", { class: "tbl" },
-      el("thead", {}, el("tr", {}, ...["Miembro", "Rango", "Última vez", "Horas hoy", "Tareas del mes", "Actividad", "Meses sin cumplir", ""].map((h) => el("th", {}, h)))), el("tbody", {}, ...rows))) : empty("Todavía no hay staff vinculado.");
+      el("thead", {}, el("tr", {}, ...["Miembro", "Rango", "Última vez", "Horas hoy", "Semana", "Tareas del mes", "Actividad", "Meses sin cumplir", ""].map((h) => el("th", {}, h)))), el("tbody", {}, ...rows))) : empty("Todavía no hay staff vinculado.");
     body.replaceChildren(el("p", { class: "small muted" }, `Tareas de ${d.month}. Fecha límite del staff antiguo: ${new Date(s.linkDeadline).toLocaleDateString("es-CO", { dateStyle: "long" })}. Roles de Discord: ${d.bot ? "automáticos" : "a mano (falta el bot)"}.`),
       tiles, ranks, coverageChart(d.coverage), el("h3", { class: "mt" }, "Equipo"), table);
     requestAnimationFrame(() => { for (const f of body.querySelectorAll(".meter__fill")) f.style.width = `${f.dataset.w}%`; });
@@ -1136,6 +1163,7 @@
       return el("article", { class: "item" },
         el("div", { class: "item__head" }, el("span", { class: "item__title" }, `${userLine(p.user)}: ${RANK_NAME[p.from_rank]} → ${RANK_NAME[p.to_rank]}`), adminOnly ? pill("pending_admin", "Solo el Admin") : null),
         el("p", { class: "item__meta" }, `Pedido por ${p.requested_by} · ${when(p.created_at)}`), el("p", {}, p.reason || ""),
+        p.check ? el("details", { class: "answers" }, el("summary", {}, p.check.eligible ? "✔ Cumple los requisitos" : "✖ No cumple todos los requisitos (puedes aprobarlo igual)"), checksList(p.check.checks)) : null,
         (!adminOnly || isAdmin()) ? el("div", { class: "item__actions" }, note,
           btn("Aprobar ascenso", "btn--green", (b) => act(b, () => api("/api/mod/staff/promotion", { id: p.id, action: "approve", note: note.value }), "Ascenso aprobado.", refreshMod)),
           btn("Rechazar", "btn--red", (b) => act(b, () => api("/api/mod/staff/promotion", { id: p.id, action: "reject", note: note.value }), "Ascenso rechazado.", refreshMod))) : null);
@@ -1189,6 +1217,176 @@
         el("li", {}, "403 = al bot le falta «Gestionar roles» o su rol está por debajo del rol que intenta poner."),
         el("li", {}, "Para leer quién tiene rol de staff en Discord, activa «Server Members Intent» en la pestaña Bot de tu app.")),
       el("div", { class: "form-actions" }, uid, btn("Comprobar", "btn--yolk", run)), out);
+  }
+
+  // ---------- Inicio por rol ----------
+  const PRIO = { 1: ["urgent", "Urgente"], 2: ["high", "Importante"], 3: ["low", "Cuando puedas"] };
+  async function homeDashboard(u) {
+    const h = await api("/api/home");
+    const out = [];
+    const hello = el("div", { class: "box hero-card home-hero" },
+      el("div", {}, el("p", { class: "small muted" }, new Date().toLocaleDateString("es-CO", { weekday: "long", day: "numeric", month: "long" })),
+        el("h2", {}, `Hola, ${u.globalName || u.username}`),
+        el("p", { class: "muted" }, h.items.length ? `Tienes ${h.items.length} cosa(s) pendiente(s)${h.items.some((i) => i.priority === 1) ? ", empieza por las urgentes." : "."}` : "Todo al día. ¡Buen trabajo!")),
+      h.me ? el("div", { class: "hero-card__stats" },
+        tile(h.me.week.met ? "✔" : `${String(h.me.week.totalHours).replace(".", ",")}/${h.me.week.targetHours} h`, "cuota de la semana", h.me.week.met ? "good" : null),
+        tile(`${h.me.month.percent}%`, "tareas del mes", h.me.month.complete ? "good" : h.me.month.percent < 50 ? "warn" : null),
+        tile(String(h.me.strikes), "meses sin cumplir", h.me.strikes ? "warn" : null)) : null);
+    out.push(hello);
+    if (!u.roles.inGuild) out.push(el("div", { class: "notice" }, "No estás en el Discord de Sky Eggs. Únete y vuelve a entrar para que podamos ver tus roles. ",
+      el("a", { href: "https://discord.gg/sTgtR7KdGQ", target: "_blank", rel: "noopener" }, "Unirme al Discord")));
+    if (h.items.length) out.push(el("div", { class: "box" }, el("h2", {}, "Pendientes"),
+      el("ul", { class: "todo" }, ...h.items.map((i) => {
+        const [cls, label] = PRIO[i.priority];
+        return el("li", { class: `todo__item todo--${cls}` },
+          el("span", { class: "todo__icon", "aria-hidden": "true" }, i.icon),
+          el("div", { class: "todo__body" }, el("div", { class: "todo__head" }, el("strong", {}, i.title), i.count ? el("span", { class: "count" }, String(i.count)) : null, el("span", { class: `prio prio--${cls}` }, label)),
+            i.detail ? el("p", { class: "small muted" }, i.detail) : null),
+          el("a", { class: "btn btn--mini btn--white", href: `#${i.page}` }, "Ir"));
+      }))));
+    if (h.quick.length) out.push(el("div", { class: "box" }, el("h2", {}, "Accesos rápidos"),
+      el("div", { class: "quick" }, ...h.quick.map((q) => el("a", { class: "quick__btn", href: `#${q.page}` }, el("span", { "aria-hidden": "true" }, q.icon), q.label)))));
+    if (h.team) out.push(el("div", { class: "box" }, el("h2", {}, "El equipo ahora"),
+      el("div", { class: "tiles" }, tile(`${h.team.online}/${h.team.total}`, "staff conectado", h.team.online ? "good" : "warn"),
+        tile(`${h.team.weekMet}/${h.team.total}`, "con la cuota de la semana"), tile(String(h.team.atRisk), "en riesgo este mes", h.team.atRisk ? "warn" : null),
+        tile(String(h.team.reportsOpen), "reportes abiertos", h.team.reportsOpen ? "warn" : null)),
+      h.team.onlineNow.length ? el("p", { class: "small" }, "En el juego: ", ...h.team.onlineNow.flatMap((m, i) => [i ? ", " : "", rankPill(m.rank), ` ${m.name}`])) : el("p", { class: "small muted" }, "Nadie del staff está en el juego ahora.")));
+    return out;
+  }
+
+  const checksList = (checks) => el("ul", { class: "checks" }, ...checks.map((c) => el("li", { class: c.ok ? "ok" : "bad" }, el("strong", {}, `${c.ok ? "✔" : "✖"} ${c.label}`), c.detail ? el("span", { class: "small muted" }, ` — ${c.detail}`) : null)));
+  const h1 = (v) => String(v).replace(".", ",");
+
+  // Cuota semanal: barra apilada juego + Discord con la meta y el mínimo en el juego.
+  function weekCard(w, title) {
+    const max = Math.max(w.targetHours, w.totalHours, 0.1);
+    const g = el("div", { class: "qbar__game", "data-w": (w.gameHours / max) * 100, title: `Juego: ${h1(w.gameHours)} h` });
+    const d = el("div", { class: "qbar__discord", "data-w": (w.discordHours / max) * 100, title: `Discord: ${h1(w.discordHours)} h` });
+    const goal = el("div", { class: "qbar__goal", "data-l": (w.targetHours / max) * 100 }, el("span", {}, `${h1(w.targetHours)} h`));
+    const min = el("div", { class: "qbar__min", "data-l": (w.minGameHours / max) * 100, title: `Mínimo en el juego: ${h1(w.minGameHours)} h` });
+    const box = el("div", { class: "box" },
+      el("div", { class: "item__head" }, el("h2", {}, title), w.excused ? pill("approved", "Excusada") : w.met ? pill("approved", "Cumplida") : pill("pending", `Faltan ${h1(w.missingHours || w.missingGameHours)} h`)),
+      el("p", { class: "small muted" }, `Semana del ${w.start.split("-").reverse().join("/")} al ${w.end.split("-").reverse().join("/")}. Cuentan las horas en el juego y lo que escribes en el Discord. Esta semana te piden ${h1(w.requiredGameHours)} h en el juego: baja cuanto más ayudes en Discord, hasta un mínimo de ${h1(w.minGameHours)} h.`),
+      el("div", { class: "qbar", role: "img", "aria-label": `${h1(w.gameHours)} h en el juego y ${h1(w.discordHours)} h en Discord de ${h1(w.targetHours)} h` }, g, d, min, goal),
+      el("div", { class: "legend" }, el("span", { class: "legend__p" }, `Juego ${h1(w.gameHours)} h`), el("span", { class: "legend__s" }, `Discord ${h1(w.discordHours)} h`), el("span", { class: "legend__m" }, `Mínimo en el juego ${h1(w.minGameHours)} h`)));
+    requestAnimationFrame(() => {
+      for (const b of box.querySelectorAll("[data-w]")) b.style.width = `${b.dataset.w}%`;
+      for (const b of box.querySelectorAll("[data-l]")) b.style.left = `${Math.min(100, b.dataset.l)}%`;
+    });
+    return box;
+  }
+  function weeksBlock(p) {
+    if (!p.weeks?.length) return null;
+    return el("div", { class: "box" }, el("h2", {}, `Semanas de ${p.month}`),
+      el("div", { class: "weeks" }, ...p.weeks.map((w) => el("div", { class: `wk${w.met ? " is-met" : ""}${w.current ? " is-current" : ""}${!w.ended && !w.current ? " is-future" : ""}` },
+        el("strong", {}, `${w.start.slice(8)}/${w.start.slice(5, 7)}`),
+        el("span", {}, w.excused ? "Excusada" : w.met ? "✔ Cumplida" : w.current ? `${h1(w.totalHours)}/${h1(w.targetHours)} h` : w.ended ? `✖ ${h1(w.totalHours)} h` : "—"),
+        el("span", { class: "small muted" }, `${h1(w.gameHours)} juego · ${h1(w.discordHours)} Discord`)))));
+  }
+
+  // ---------- Excusas ----------
+  async function staffExcuses(s) {
+    const st = await api("/api/staff/me");
+    if (!st.current) return s.replaceChildren(el("div", { class: "notice" }, "Todavía no tienes un rango de staff activo."));
+    const r = st.excuseRules;
+    const form = el("form", { class: "form" },
+      el("div", { class: "row" },
+        el("label", {}, "¿Qué no vas a poder (o no pudiste) cumplir?", el("select", { name: "kind" },
+          el("option", { value: "week:current" }, "Esta semana (cuota semanal)"), el("option", { value: "week:previous" }, "La semana pasada"),
+          el("option", { value: "month:current" }, "Este mes (todas las tareas)"), el("option", { value: "month:previous", selected: Boolean(st.removalDueAt) }, "El mes pasado")))),
+      el("label", {}, "Motivo", el("textarea", { name: "reason", required: true, maxlength: "800", rows: "3", placeholder: "Ej.: exámenes finales, viaje sin internet, enfermedad…" })),
+      el("label", {}, "Prueba o enlace (opcional)", el("input", { name: "url", type: "url", placeholder: "https://…" })),
+      el("div", { class: "form-actions" }, el("button", { class: "btn btn--yolk", type: "submit" }, "Enviar excusa")));
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const f = new FormData(form);
+      const [scope, which] = String(f.get("kind")).split(":");
+      act(e.submitter, () => api("/api/staff/excuse", { scope, which, reason: f.get("reason"), url: f.get("url") }), "Excusa enviada. Un rango superior la revisará.", () => show("staff-excusas"));
+    });
+    const ST = { pending: "En revisión", approved: "Aprobada", rejected: "Rechazada" };
+    s.replaceChildren(...[
+      st.removalDueAt ? el("div", { class: "notice notice--bad" }, `Sales del staff el ${new Date(st.removalDueAt).toLocaleDateString("es-CO", { dateStyle: "long" })} si no te aprueban una excusa del mes pasado. Mientras esté en revisión no se aplica.`) : null,
+      el("div", { class: "box" }, el("h2", {}, "Presentar una excusa"),
+        el("p", { class: "muted" }, `Si una semana o un mes no puedes cumplir, cuéntalo aquí. Si la aprueban, esa semana cuenta como cumplida o ese mes no suma falta, y mantienes tu rango. Tienes ${r.days} días después del cierre de mes para excusar el mes pasado. Excusas aprobadas este año: ${r.usedThisYear} de ${r.maxPerYear}.`), form),
+      el("div", { class: "box" }, el("h2", {}, "Mis excusas"), st.excuses.length ? el("table", { class: "tbl" },
+        el("thead", {}, el("tr", {}, ...["Enviada", "Periodo", "Motivo", "Estado", "Respuesta"].map((x) => el("th", {}, x)))),
+        el("tbody", {}, ...st.excuses.map((x) => el("tr", {}, el("td", {}, when(x.createdAt)), el("td", {}, x.scope === "week" ? `Semana del ${x.period.split("-").reverse().join("/")}` : `Mes ${x.period}`),
+          el("td", { class: "small" }, x.reason), el("td", {}, pill(x.status, ST[x.status])), el("td", { class: "small" }, x.reviewNote ? `${x.reviewedBy}: ${x.reviewNote}` : x.reviewedBy || "")))))
+        : empty("No has presentado excusas."))].filter(Boolean));
+  }
+
+  async function staffExcuseReview(body) {
+    const { excuses } = await api("/api/mod/staff/excuses");
+    body.replaceChildren(excuses.length ? el("div", { class: "list" }, ...excuses.map((x) => {
+      const note = noteInput("Respuesta (obligatoria si rechazas)");
+      return el("article", { class: `item${x.removal_due_at ? " item--urgent" : ""}` },
+        el("div", { class: "item__head" }, el("span", { class: "item__title" }, `📝 ${userLine(x.user)}`), rankPill(x.rank)),
+        el("p", { class: "item__meta" }, `${x.scope === "week" ? `Semana del ${x.period.split("-").reverse().join("/")}` : `Mes ${x.period}`} · ${when(x.created_at)} · ${x.strikes} mes(es) sin cumplir`,
+          x.removal_due_at ? el("strong", {}, ` · sale del staff el ${new Date(x.removal_due_at).toLocaleDateString("es-CO")} si se rechaza`) : ""),
+        el("p", {}, x.reason), x.url ? el("p", {}, link(x.url, "Ver prueba")) : null,
+        el("div", { class: "item__actions" }, note,
+          btn("Aprobar", "btn--green", (b) => act(b, () => api("/api/mod/staff/excuse", { id: x.id, action: "approve", note: note.value }), "Excusa aprobada: mantiene su rango.", refreshMod)),
+          btn("Rechazar", "btn--red", (b) => { if (!note.value.trim()) return flash("Escribe el motivo en la respuesta.", "bad"); act(b, () => api("/api/mod/staff/excuse", { id: x.id, action: "reject", note: note.value }), "Excusa rechazada.", refreshMod); })));
+    })) : empty("No hay excusas por revisar."));
+  }
+
+  // ---------- Ajustes del staff (Admin) ----------
+  async function adminStaffSettings(s) {
+    const d = await api("/api/mod/staff/settings");
+    const st = structuredClone(d.settings);
+    const ro = !isAdmin();
+    const RK = ["Helper", "ModeratorJr", "Moderator"];
+    const numIn = (get, set, { min = 0, max = 500, step = 1 } = {}) => {
+      const i = el("input", { type: "number", min: String(min), max: String(max), step: String(step), value: String(get()), class: "num", disabled: ro });
+      i.addEventListener("input", () => set(Number(i.value)));
+      return i;
+    };
+    const TASKS = staffProgram.tasks;
+    const targets = el("table", { class: "tbl tbl--grid" },
+      el("thead", {}, el("tr", {}, el("th", {}, "Tarea del mes"), ...RK.map((r) => el("th", {}, RANK_NAME[r])))),
+      el("tbody", {}, ...TASKS.map((t) => el("tr", {}, el("th", { scope: "row" }, t.name, el("div", { class: "small muted" }, `${t.unit}${t.track === "auto" ? " · automática" : " · con evidencia"}${t.optional ? " · extra" : ""}`)),
+        ...RK.map((r) => el("td", {}, numIn(() => st.targets[t.key][r], (v) => { st.targets[t.key][r] = v; }, { max: t.key === "weeks" ? 5 : 500 })))))));
+    const weekly = el("table", { class: "tbl tbl--grid" },
+      el("thead", {}, el("tr", {}, el("th", {}, "Cuota semanal"), ...RK.map((r) => el("th", {}, RANK_NAME[r])))),
+      el("tbody", {},
+        el("tr", {}, el("th", { scope: "row" }, "Horas de conexión (juego + Discord)"), ...RK.map((r) => el("td", {}, numIn(() => st.weekly[r].hours, (v) => { st.weekly[r].hours = v; }, { max: 80, step: 0.5 })))),
+        el("tr", {}, el("th", { scope: "row" }, "Mínimo en el juego", el("div", { class: "small muted" }, "aunque escriba mucho en Discord")), ...RK.map((r) => el("td", {}, numIn(() => st.weekly[r].minGameHours, (v) => { st.weekly[r].minGameHours = v; }, { max: 80, step: 0.5 }))))));
+    const promo = el("table", { class: "tbl tbl--grid" },
+      el("thead", {}, el("tr", {}, el("th", {}, "Para pedir ascenso a"), el("th", {}, "Moderator Jr"), el("th", {}, "Moderator"))),
+      el("tbody", {}, ...[["minDays", "Días mínimos en su rango", 365], ["minPercent", "% de tareas del mes en curso", 100], ["completeMonths", "Meses cumplidos seguidos", 6]].map(([k, label, max]) =>
+        el("tr", {}, el("th", { scope: "row" }, label), ...["ModeratorJr", "Moderator"].map((r) => el("td", {}, numIn(() => st.promotion[r][k], (v) => { st.promotion[r][k] = v; }, { max })))))));
+    const rules = el("div", { class: "form" }, el("div", { class: "row" }, ...[
+      ["failMonthsToRemove", "Meses seguidos sin cumplir para salir (0 = nunca)", 12], ["excuseDays", "Días para presentar excusa antes de salir", 30],
+      ["maxExcusesPerYear", "Excusas aprobadas por año", 24], ["warnDay", "Día del mes del aviso", 28], ["warnPercent", "Avisar si va por debajo del %", 100], ["graceDays", "Días para subir evidencias del mes pasado", 10],
+    ].map(([k, label, max]) => el("label", {}, label, numIn(() => st.rules[k], (v) => { st.rules[k] = v; }, { max })))));
+    const chans = el("textarea", { rows: "2", placeholder: "IDs de canales separados por coma (clic derecho en el canal → Copiar ID)", disabled: ro }, st.discord.channels.join(", "));
+    chans.addEventListener("input", () => { st.discord.channels = chans.value.split(/[\s,]+/).filter(Boolean); });
+    const counts = el("input", { type: "checkbox", checked: st.discord.countsForDays, disabled: ro });
+    counts.addEventListener("change", () => { st.discord.countsForDays = counts.checked; });
+    const chStatus = (list) => list.length ? el("ul", { class: "checks" }, ...list.map((c) => el("li", { class: c.error ? "bad" : "ok" },
+      el("strong", {}, `${c.error ? "✖" : "✔"} #${c.name || c.id}`), el("span", { class: "small muted" }, c.error ? ` — ${c.error}` : c.lastRead ? ` — leído ${ago(c.lastRead)}` : " — todavía no se leyó")))) : el("p", { class: "small muted" }, "Sin canales: la actividad en Discord no cuenta todavía.");
+    const chBox = el("div", {}, chStatus(d.channels));
+    const discord = el("div", { class: "form" },
+      el("label", {}, "Canales que cuentan como actividad", chans),
+      el("div", { class: "row" },
+        el("label", {}, "Ventana (minutos con al menos un mensaje)", numIn(() => st.discord.windowMinutes, (v) => { st.discord.windowMinutes = v; }, { min: 1, max: 30 })),
+        el("label", {}, "Peso (1 = cada minuto en Discord vale 1 minuto de juego)", numIn(() => st.discord.weight, (v) => { st.discord.weight = v; }, { max: 3, step: 0.05 })),
+        el("label", {}, "Tope por día (minutos)", numIn(() => st.discord.dailyCapMinutes, (v) => { st.discord.dailyCapMinutes = v; }, { max: 600 }))),
+      el("label", { class: "check" }, counts, "Un día con 10 minutos de actividad en Discord cuenta como día activo"),
+      chBox,
+      !ro ? el("div", { class: "form-actions" }, btn("Leer los canales ahora", "btn--white", (b) => act(b, () => api("/api/mod/staff/discord-poll", {}), (o) => { chBox.replaceChildren(chStatus(o.channels)); return `${o.messages} mensaje(s) nuevos, ${o.counted} del staff.${o.errors.length ? " Hay errores en algún canal." : ""}`; }))) : null,
+      el("p", { class: "small muted" }, "El bot lee cada 5 minutos solo quién escribió y cuándo (nunca el texto, no hace falta «Message Content Intent»). Necesita «Ver canal» y «Leer el historial de mensajes» en esos canales. La primera lectura empieza desde ese momento, no cuenta mensajes viejos."));
+    const save = !ro ? el("div", { class: "form-actions sticky-actions" },
+      btn("Guardar ajustes", "btn--yolk", (b) => act(b, () => api("/api/mod/staff/settings", { settings: st }), "Ajustes guardados. Se aplican desde ya a las tareas y cuotas.", async () => { staffProgram = await api("/api/staff/program"); show("admin-staff-ajustes"); })),
+      btn("Volver a los valores por defecto", "btn--white", (b) => { if (confirm("¿Volver a los valores por defecto?")) act(b, () => api("/api/mod/staff/settings", { reset: true }), "Ajustes restablecidos.", () => show("admin-staff-ajustes")); }),
+      d.updatedAt ? el("span", { class: "small muted" }, `Último cambio: ${d.updatedBy} · ${when(d.updatedAt)}`) : null) : el("div", { class: "notice" }, "Solo el Admin cambia estos valores. Así se mide tu rango.");
+    s.replaceChildren(
+      el("div", { class: "box" }, el("h2", {}, "Cuota semanal de conexión"), el("p", { class: "small muted" }, "Se cumple si juego + crédito de Discord llega a las horas y el juego llega al mínimo. Con más actividad en Discord se piden menos horas en el juego, nunca menos que el mínimo."), el("div", { class: "scrollx" }, weekly)),
+      el("div", { class: "box" }, el("h2", {}, "Actividad en Discord"), discord),
+      el("div", { class: "box" }, el("h2", {}, "Metas del mes"), el("p", { class: "small muted" }, "0 = esa tarea no se pide en ese rango. «Semanas con la cuota cumplida» nunca pide más semanas de las que tiene el mes."), el("div", { class: "scrollx" }, targets)),
+      el("div", { class: "box" }, el("h2", {}, "Requisitos de ascenso"), el("p", { class: "small muted" }, "Para que el propio miembro pida el ascenso. Un rango superior puede proponerlo igual, y al final decide quien aprueba (a Moderator, solo el Admin)."), el("div", { class: "scrollx" }, promo)),
+      el("div", { class: "box" }, el("h2", {}, "Faltas, avisos y excusas"), rules),
+      save);
   }
 
   // ---------- Arranque ----------
