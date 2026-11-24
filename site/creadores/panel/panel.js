@@ -1449,10 +1449,10 @@
       check(st.interactions, "Botones activos (DISCORD_PUBLIC_KEY + Interactions Endpoint URL)", st.interactions ? "funcionan ❤️ Me gusta, ¡Voy!, En mi idioma, Estadísticas y los avisos" : el("span", {}, "pon la Public Key en el .env y en el Developer Portal la URL ", el("code", {}, st.interactionsUrl))),
       check(true, "Canal de videos aprobados", el("span", {}, ch(st.videoChannel), st.videoPingRole ? " · avisa a " : " · sin rol de aviso (DISCORD_ROLE_VIDEO_PING)", st.videoPingRole ? ch(st.videoPingRole) : null)),
       check(true, "Canal de alertas de huevos", el("span", {}, ch(st.eggChannel), " · ping a ", ch(st.eggPingRole), ` · idioma ${st.eggLang}`)),
-      check(st.assets.total > 0, `Imágenes del juego guardadas: ${st.assets.saved || 0} de ${st.assets.total || 0}`, st.assets.total ? (st.assets.apiKey ? "con ROBLOX_API_KEY (originales)" : "sin ROBLOX_API_KEY: miniaturas públicas (las privadas fallan)") : "el juego manda el catálogo al arrancar cada servidor")));
+      check(st.assets.total > 0, `Imágenes del juego guardadas: ${st.assets.saved || 0} de ${st.assets.total || 0}`, st.assets.total ? `${st.assets.apiKey ? "con ROBLOX_API_KEY (originales)" : "sin ROBLOX_API_KEY: miniaturas públicas (las privadas fallan)"}${st.assets.errors ? ` · ${st.assets.errors} con error` : ""}` : "vacío: el catálogo llega cuando arranca un servidor del juego publicado (no hace falta tocar nada)")));
     const acts = el("div", { class: "form-actions" },
       isAdmin() ? btn("🥚 Probar alerta de huevo", "btn--yolk", (b) => act(b, () => api("/api/mod/bot/test-egg", {}), "Alerta de prueba enviada al canal de huevos (sale como [STUDIO]).", () => show(current))) : null,
-      isAdmin() ? btn("🖼️ Volver a bajar las imágenes", "btn--white", (b) => act(b, () => api("/api/mod/assets/sync", { force: true }), "Bajando las imágenes en segundo plano. Vuelve en un minuto.")) : null);
+      isAdmin() ? btn("🖼️ Volver a bajar las imágenes", "btn--white", (b) => act(b, () => api("/api/mod/assets/sync", { force: true }), (o) => (o.started ? `Bajando ${o.total} imágenes en segundo plano. Vuelve en un minuto.` : "Todavía no hay catálogo: lo manda cada servidor del juego al arrancar (hace falta la versión publicada). Cuando entre alguien al juego, las imágenes se bajan solas."), () => setTimeout(() => show(current), 1500))) : null);
     box.append(acts);
     const when2 = (t) => (t ? ago(t) : "—");
     box.append(el("h3", {}, "Últimas alertas de huevos"), st.alerts.length ? el("div", { class: "tbl-wrap" }, el("table", { class: "tbl" },
