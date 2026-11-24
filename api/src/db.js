@@ -338,6 +338,47 @@ export function openDb(path) {
   db.exec("CREATE TABLE IF NOT EXISTS staff_month_results (discord_id TEXT NOT NULL, month TEXT NOT NULL, percent INTEGER NOT NULL, complete INTEGER NOT NULL, excused INTEGER NOT NULL DEFAULT 0, strike INTEGER NOT NULL DEFAULT 0, evaluated_at INTEGER NOT NULL, PRIMARY KEY (discord_id, month))");
   if (!cols("staff_month_results").includes("performance")) db.exec("ALTER TABLE staff_month_results ADD COLUMN performance INTEGER NOT NULL DEFAULT 0");
   if (!cols("players").includes("job_id")) db.exec("ALTER TABLE players ADD COLUMN job_id TEXT");
+  // Cuenta de Roblox de cada usuario del panel (obligatoria desde 2026-11-24). Se rellena con lo que ya se sabía.
+  if (!cols("discord_users").includes("roblox_user_id")) {
+    db.exec("ALTER TABLE discord_users ADD COLUMN roblox_user_id INTEGER");
+    db.exec("ALTER TABLE discord_users ADD COLUMN roblox_linked_at INTEGER");
+    const known = db.prepare(`
+      SELECT d.id,
+        COALESCE(
+          (SELECT roblox_user_id FROM creators WHERE discord_id = d.id AND link_status IN ('approved','pending','removed')),
+          (SELECT roblox_user_id FROM staff WHERE discord_id = d.id AND roblox_user_id IS NOT NULL),
+          (SELECT roblox_user_id FROM applications WHERE discord_id = d.id AND roblox_user_id IS NOT NULL ORDER BY (status = 'approved') DESC, id DESC LIMIT 1)
+        ) AS rid
+      FROM discord_users d`).all();
+    const used = new Set();
+    const set = db.prepare("UPDATE discord_users SET roblox_user_id = ?, roblox_linked_at = ? WHERE id = ?");
+    for (const k of known) if (k.rid && !used.has(k.rid)) { used.add(k.rid); set.run(k.rid, Date.now(), k.id); }
+  }
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS discord_users_roblox ON discord_users(roblox_user_id) WHERE roblox_user_id IS NOT NULL");
+  // Bot de Discord (2026-11-24): imágenes del juego, alertas de huevos y anuncios de videos con botones.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS game_assets (
+      asset_id INTEGER PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL, rarity TEXT,
+      file TEXT, source TEXT, fetched_at INTEGER, error TEXT, updated_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS egg_alerts (
+      id INTEGER PRIMARY KEY,
+      alert_key TEXT NOT NULL UNIQUE,      -- jobId:contador (lo pone el juego)
+      job_id TEXT, place_id INTEGER, studio INTEGER NOT NULL DEFAULT 0,
+      asset TEXT NOT NULL, rarity TEXT, size TEXT, weight REAL, value REAL,
+      place TEXT, icon_id INTEGER, players INTEGER, max_players INTEGER,
+      i18n TEXT,                           -- nombres traducidos que manda el juego { en: {...}, es: {...} }
+      created_at INTEGER NOT NULL,
+      channel_id TEXT, message_id TEXT, image_url TEXT, post_error TEXT,
+      status TEXT NOT NULL DEFAULT 'active', -- active | grabbed | gone
+      grabbed_by_id INTEGER, grabbed_by_name TEXT, ended_at INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS egg_alerts_time ON egg_alerts(created_at);
+    CREATE TABLE IF NOT EXISTS egg_going (alert_id INTEGER NOT NULL, discord_id TEXT NOT NULL, PRIMARY KEY (alert_id, discord_id));
+    CREATE TABLE IF NOT EXISTS video_likes (evidence_id INTEGER NOT NULL, discord_id TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (evidence_id, discord_id));
+  `);
+  for (const [c, def] of [["announce_channel", "TEXT"], ["announce_msg", "TEXT"], ["announce_views", "INTEGER"], ["announce_error", "TEXT"]])
+    if (!cols("evidences").includes(c)) db.exec(`ALTER TABLE evidences ADD COLUMN ${c} ${def}`);
   db.exec(`
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_by TEXT, updated_at INTEGER NOT NULL

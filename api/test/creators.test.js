@@ -199,6 +199,16 @@ async function login(base, code) {
   const cookie = r2.headers.getSetCookie().find((x) => x.startsWith("se_user=")).split(";")[0];
   return cookie;
 }
+// Login + cuenta de Roblox vinculada (obligatoria para usar el panel).
+let nextRid = 900;
+async function loginLinked(base, db, c, code) {
+  const cookie = await login(base, code);
+  const userId = nextRid++;
+  gamePull(db, c, { players: [{ userId, name: `R_${code}`, displayName: code, level: 20 }] });
+  const r = await fetch(`${base}/api/account/roblox`, { method: "POST", headers: { "content-type": "application/json", cookie }, body: JSON.stringify({ robloxUserId: userId }) });
+  assert.equal(r.status, 200);
+  return cookie;
+}
 const json = (body, cookie) => ({ method: "POST", headers: { "content-type": "application/json", cookie }, body: JSON.stringify(body) });
 
 test("HTTP: login con Discord lee los roles y protege cada zona", async () => {
@@ -214,13 +224,19 @@ test("HTTP: login con Discord lee los roles y protege cada zona", async () => {
     assert.equal((await fetch(`${base}/api/creators/me`, { headers: { cookie: fan } })).status, 403);
     assert.equal((await fetch(`${base}/api/mod/queue`, { headers: { cookie: fan } })).status, 403);
     gamePull(db, c, { players: [{ userId: 700, name: "FanYT", displayName: "Fan", level: 15 }] });
+    // Sin cuenta de Roblox vinculada no puede usar el panel.
+    const noLink = await fetch(`${base}/api/creators/apply`, json({ age13: true, robloxUserId: 700, platforms: [{ type: "TikTok", url: "https://tiktok.com/@fan" }], about: "Quiero grabar Sky Eggs todos los días." }, fan));
+    assert.equal((await noLink.json()).error, "link_roblox");
+    assert.equal((await fetch(`${base}/api/account/roblox`, json({ robloxUserId: 12345 }, fan))).status, 400); // nunca jugó
+    assert.equal((await fetch(`${base}/api/account/roblox`, json({ robloxUserId: 700 }, fan))).status, 200);
+    assert.equal((await (await fetch(`${base}/api/me`, { headers: { cookie: fan } })).json()).user.roblox.name, "FanYT");
     const found = await (await fetch(`${base}/api/players/search?q=fany&played=1`)).json();
     assert.equal(found.players.length, 1);
     assert.equal((await (await fetch(`${base}/api/players/search?q=nadie&played=1`)).json()).players.length, 0);
     const apply = await fetch(`${base}/api/creators/apply`, json({ age13: true, robloxUserId: 700, platforms: [{ type: "TikTok", url: "https://tiktok.com/@fan" }], about: "Quiero grabar Sky Eggs todos los días." }, fan));
     assert.equal(apply.status, 200);
 
-    const mod = await login(base, "mod");
+    const mod = await loginLinked(base, db, c, "mod");
     const q = await (await fetch(`${base}/api/mod/queue`, { headers: { cookie: mod } })).json();
     assert.equal(q.actor.role, "moderator");
     assert.equal(q.applications.length, 1);
@@ -230,14 +246,15 @@ test("HTTP: login con Discord lee los roles y protege cada zona", async () => {
     assert.equal((await fetch(`${base}/api/mod/special`, json({ id: 1, action: "approve" }, mod))).status, 403); // solo admin
     assert.equal((await fetch(`${base}/api/admin/metrics`, { headers: { cookie: mod } })).status, 403);
 
-    const adm = await login(base, "adm");
+    const adm = await loginLinked(base, db, c, "adm");
     assert.equal((await fetch(`${base}/api/admin/metrics`, { headers: { cookie: adm } })).status, 200);
     const audit = await (await fetch(`${base}/api/mod/audit`, { headers: { cookie: adm } })).json();
-    assert.equal(audit.audit[0].actor_name, "MOD (@user_mod)");
-    assert.equal(audit.audit[0].action, "application.approve");
+    const approved = audit.audit.find((x) => x.action === "application.approve");
+    assert.equal(approved.actor_name, "MOD (@user_mod)");
+    assert.equal(audit.audit[0].action, "account.roblox"); // vincular la cuenta también queda registrado
 
     // creador: sube imagen, solo él y el staff la ven
-    const cre = await login(base, "cre");
+    const cre = await loginLinked(base, db, c, "cre");
     const png = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex");
     const up = await fetch(`${base}/api/creators/upload`, { method: "POST", headers: { "content-type": "image/png", cookie: cre }, body: png });
     const { file } = await up.json();
@@ -655,7 +672,7 @@ test("moderador corrige redes repetidas y un video en vez del canal (queda en el
 
 test("HTTP: sin estar en el servidor de Discord no puede usar el panel", async () => {
   const fake = fakeDiscord({ fan: [] }); // "fuera" no está en el servidor (Discord responde 404)
-  await withServer(async (base) => {
+  await withServer(async (base, db, c) => {
     const out = await login(base, "fuera");
     const me = await (await fetch(`${base}/api/me`, { headers: { cookie: out } })).json();
     assert.equal(me.user.roles.inGuild, false);
@@ -664,7 +681,39 @@ test("HTTP: sin estar en el servidor de Discord no puede usar el panel", async (
     assert.equal((await apply.json()).error, "join_guild");
     assert.equal((await (await fetch(`${base}/api/mod/queue`, { headers: { cookie: out } })).json()).error, "join_guild");
     // Ya en el servidor (sin rol): pasa el filtro y le toca la regla normal.
-    const fan = await login(base, "fan");
+    const fan = await loginLinked(base, db, c, "fan");
     assert.equal((await (await fetch(`${base}/api/creators/me`, { headers: { cookie: fan } })).json()).error, "creator_only");
   }, fake);
+});
+
+test("aprobado sin estar en el servidor de Discord: el rol queda pendiente y se pone solo al unirse", async () => {
+  const { sweepPendingRoles } = await import("../src/app.js");
+  const db = openDb(":memory:"); const c = cfgAuto();
+  c.discord = { ...c.discord, botToken: "bot-token" };
+  const uid = "555555555";
+  seedUser(db, uid, {}); seedUser(db, "mod", { moderator: true }); seedRoblox(db, c, 777, "NuevoCreador");
+  const { id } = C.submitApplication(db, uid, { age13: true, robloxUserId: 777, about: "Hago videos de Sky Eggs cada semana!", platforms: [{ type: "TikTok", url: "https://tiktok.com/@nuevo" }] });
+  C.reviewApplication(db, actor("mod"), { id, action: "approve" });
+  let inGuild = false;
+  const calls = [];
+  const fake = async (url, init = {}) => {
+    calls.push(`${init.method || "GET"} ${url}`);
+    if (!inGuild) return { ok: false, status: 404, json: async () => ({ code: 10007, message: "Unknown Member" }) };
+    if ((init.method || "GET") === "GET") return { ok: true, status: 200, json: async () => ({ roles: [] }) };
+    return { ok: true, status: 204, json: async () => null };
+  };
+  // Al aprobar todavía no está: queda pendiente (no es un error para el moderador).
+  const r = await runRoleJobs(db, c, [{ discordId: uid, tierKey: "Creator" }], fake, silent);
+  assert.equal(r[0].notMember, true);
+  assert.equal(C.auditList(db)[0].action, "discord.roles_pending");
+  assert.equal((await sweepPendingRoles(db, c, fake, silent)).fixed, 0);
+  // Se une al servidor: la siguiente vuelta le pone el rol.
+  inGuild = true;
+  const out = await sweepPendingRoles(db, c, fake, silent);
+  assert.equal(out.fixed, 1);
+  assert.ok(calls.some((x) => x === `PUT https://discord.com/api/v10/guilds/${c.discord.guildId}/members/${uid}/roles/${ROLE.creator}`));
+  assert.equal(C.getDiscordUser(db, uid).roles.creator, true);
+  assert.equal((await sweepPendingRoles(db, c, fake, silent)).checked, 0); // ya no está pendiente
+  // Su cuenta de Roblox quedó como la cuenta del panel.
+  assert.equal(C.getDiscordUser(db, uid).roblox.userId, 777);
 });

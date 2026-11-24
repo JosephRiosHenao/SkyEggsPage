@@ -241,6 +241,10 @@ export async function probeViews(cfg, url, fetchImpl = fetch) {
       channelUrl: typeof (j.channel_url || j.uploader_url) === "string" ? String(j.channel_url || j.uploader_url).slice(0, 300) : null,
       uploadDate: d,
       live: Boolean(j.is_live || j.was_live),
+      // Miniatura (para el anuncio en Discord). En YouTube se arma con el id del video.
+      thumbnail: site === "youtube" && youtubeId(url) ? `https://i.ytimg.com/vi/${youtubeId(url)}/hqdefault.jpg`
+        : typeof j.thumbnail === "string" && /^https:\/\//.test(j.thumbnail) ? j.thumbnail.slice(0, 600) : null,
+      duration: Number.isFinite(Number(j.duration)) ? Math.round(Number(j.duration)) : null,
     },
   };
 }

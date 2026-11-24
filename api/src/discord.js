@@ -143,6 +143,7 @@ export async function setMemberRoles(cfg, discordId, { add = [], remove = [] }, 
   if (!/^\d{5,25}$/.test(String(discordId))) return { ok: false, done: [], errors: ["bad_user"] };
   const done = [];
   const errors = [];
+  let notMember = false;
   const headers = {
     authorization: `Bot ${cfg.discord.botToken}`,
     "x-audit-log-reason": encodeURIComponent(String(reason).slice(0, 200)),
@@ -160,6 +161,8 @@ export async function setMemberRoles(cfg, discordId, { add = [], remove = [] }, 
         }
         // Quitar un rol a quien ya salió del servidor no es un error real.
         if (method === "DELETE" && r.body?.code === 10007) { done.push(`-${role} (no está en el servidor)`); return; }
+        // Poner un rol a quien todavía no se unió: queda pendiente y se pone solo cuando entre.
+        if (r.body?.code === 10007) notMember = true;
         errors.push(`${method} ${role}: ${explainDiscordError(r.status, r.body)}`);
         return;
       } catch (e) { errors.push(`${method} ${role}: ${e.message}`); return; }
@@ -167,7 +170,18 @@ export async function setMemberRoles(cfg, discordId, { add = [], remove = [] }, 
   };
   for (const role of add) await run("PUT", role);
   for (const role of remove) await run("DELETE", role);
-  return { ok: errors.length === 0, done, errors };
+  return { ok: errors.length === 0, done, errors, notMember };
+}
+
+// Miembro del servidor (o null si no está). Necesita el bot. { ok, member } | { ok: false, error }
+export async function getMember(cfg, discordId, fetchImpl = fetch) {
+  if (!botEnabled(cfg) || !/^\d{5,25}$/.test(String(discordId))) return { ok: false, error: "bot_off" };
+  try {
+    const r = await call(fetchImpl, `${API}/guilds/${cfg.discord.guildId}/members/${discordId}`, { headers: { authorization: `Bot ${cfg.discord.botToken}` } });
+    if (r.ok) return { ok: true, member: r.body };
+    if (r.body?.code === 10007 || r.status === 404) return { ok: true, member: null };
+    return { ok: false, error: explainDiscordError(r.status, r.body) };
+  } catch (e) { return { ok: false, error: e.message }; }
 }
 
 // ---------- Diagnóstico del bot ----------

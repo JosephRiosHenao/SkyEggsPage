@@ -53,6 +53,12 @@ No tocar otros contenedores ni la configuración de un Traefik existente sin con
 - Juego: kind `staffset` en `WebRewardService`, `StaffActivity` (cuenta comandos y `;Duty`) y `Config.Commands.StaffTools` (`;Report`, `;sc`, `;Duty`, `;PlayerInfo`, `;StaffHelp`). Los comandos de cada rango viven en `Config.Roles` de HD Admin; si cambian, actualizar `staffProgram.js` y regenerar la página.
 - Panel: barra lateral en `site/creadores/panel/` (`navGroups()` en `panel.js`); "Prueba tu suerte" se incrusta desde `/admin/?embed=1`.
 
+## Bot de Discord y cuentas (2026-11-24)
+
+- Para usar el panel hay que estar en el servidor de Discord **y** tener la cuenta de Roblox vinculada (`discord_users.roblox_user_id`, `C.linkAccount`, `POST /api/account/roblox`; la API responde `join_guild` / `link_roblox`). Al aprobar un creador o staff su cuenta pasa a ser la del panel (`syncAccount`).
+- Roles pendientes: si aprueban a alguien que no está en el servidor, `sweepPendingRoles` (cada 10 min) y el login le ponen el rol cuando se une.
+- `bot.js` (REST, botones con firma Ed25519 en `POST /api/discord/interactions`), `videos.js` (anuncio de videos aprobados), `eggAlerts.js` (alertas de huevos absurdos que manda el juego a `/api/game/egg-alert`), `assets.js` (imágenes del juego en `MEDIA_DIR`, catálogo de `/api/game/catalog`). Ver `DEPLOY.md` §9.
+
 ## Conexión con el juego
 
 - El juego (place principal) tiene `WebRewardService`: cada ~60 s manda los jugadores conectados a `/api/game/pull`, recibe sus premios pendientes, los envía al buzón (`MailService.Send`, Id `web-<id>`, tirada de mascota de la rareza ganada) y confirma con `/api/game/ack`. Los códigos `SKY…` se canjean en la caja de Códigos del juego, que llama a `/api/game/redeem`.

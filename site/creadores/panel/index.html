@@ -53,21 +53,37 @@
           <p class="small muted mt">Solo leemos tu nombre, tu foto y tus roles en nuestro servidor.</p>
         </section>
 
-        <!-- Con sesión, pero fuera del servidor de Discord: sin eso no sabemos su rol -->
-        <section class="box login-card join-card" id="view-join" hidden>
-          <img src="/img/discord.webp" width="96" height="96" alt="">
-          <h2>Únete al Discord de Sky Eggs</h2>
-          <p class="muted">Hola <strong id="join-name"></strong>. Para usar el panel tienes que estar en nuestro servidor de Discord: ahí vemos si eres aspirante, creador, staff o admin.</p>
-          <ol class="join-steps">
-            <li>Entra al servidor con el botón morado.</li>
-            <li>Vuelve aquí y toca <strong>“Ya me uní”</strong>.</li>
-          </ol>
-          <div class="join-actions">
-            <a class="btn btn--discord btn--lg" href="https://discord.gg/sTgtR7KdGQ" target="_blank" rel="noopener">Unirme al servidor</a>
-            <a class="btn btn--yolk btn--lg" id="join-check" href="/api/auth/discord/login?next=/creadores/panel/">Ya me uní</a>
-          </div>
-          <p class="small muted">¿Es otra cuenta de Discord? <button class="linkbtn" type="button" id="join-logout">Salir y entrar con otra</button></p>
-        </section>
+        <!-- Requisitos para usar el panel: estar en el servidor de Discord y tener la cuenta de Roblox vinculada -->
+        <div class="gate" id="gate" role="dialog" aria-modal="true" aria-labelledby="gate-title" hidden>
+          <section class="box gate__card">
+            <ol class="gate__steps" aria-label="Pasos para entrar al panel">
+              <li class="is-done" data-step="discord"><span>1</span>Discord</li>
+              <li data-step="server"><span>2</span>Servidor</li>
+              <li data-step="roblox"><span>3</span>Roblox</li>
+            </ol>
+            <div id="gate-join" hidden>
+              <img class="gate__art" src="/img/discord.webp" width="96" height="96" alt="">
+              <h2 id="gate-title">Únete al Discord de Sky Eggs</h2>
+              <p class="muted">Para usar el panel tienes que estar en nuestro servidor de Discord: ahí vemos si eres aspirante, creador, staff o admin. Si ya te aprobaron, tu rol se pone solo al entrar.</p>
+              <ol class="join-steps">
+                <li>Entra al servidor con el botón morado.</li>
+                <li>Vuelve aquí y toca <strong>“Ya me uní”</strong>.</li>
+              </ol>
+              <div class="join-actions">
+                <a class="btn btn--discord btn--lg" href="https://discord.gg/sTgtR7KdGQ" target="_blank" rel="noopener">Unirme al servidor</a>
+                <a class="btn btn--yolk btn--lg" id="join-check" href="/api/auth/discord/login?next=/creadores/panel/">Ya me uní</a>
+              </div>
+            </div>
+            <div id="gate-link" hidden>
+              <img class="gate__art" src="/img/icon-192.png" width="96" height="96" alt="">
+              <h2 id="gate-link-title">Vincula tu cuenta de Roblox</h2>
+              <p class="muted">Es obligatorio para usar el panel: así sabemos tu rango en Sky Eggs y te llegan los premios al buzón del juego. Busca tu usuario y elige tu cuenta.</p>
+              <div id="gate-picker"></div>
+              <p class="small muted">¿No sale tu cuenta? Tienes que haber jugado Sky Eggs al menos una vez: <a href="https://www.roblox.com/es/games/77372347150746/Huevos-del-cielo" target="_blank" rel="noopener">Jugar Sky Eggs</a>.</p>
+            </div>
+            <p class="small muted gate__who">Entraste como <strong id="gate-name"></strong> · <button class="linkbtn" type="button" id="join-logout">Salir y entrar con otra cuenta</button></p>
+          </section>
+        </div>
 
         <!-- Con sesión -->
         <div id="view-app" hidden>
