@@ -61,7 +61,7 @@ export const config = {
       Moderator: process.env.DISCORD_ROLE_STAFF_MODERATOR || "1563736465522036736",
     },
   },
-  // Lectura automática de vistas (yt-dlp). Respaldo opcional para YouTube: YOUTUBE_API_KEY.
+  // Lectura automática de vistas (YouTube: páginas públicas + Return YouTube Dislike; resto: yt-dlp). YOUTUBE_API_KEY es opcional.
   views: {
     enabled: process.env.VIEWS_AUTO !== "false",
     ytdlpPath: process.env.YTDLP_PATH || "/opt/ytdlp/bin/yt-dlp",

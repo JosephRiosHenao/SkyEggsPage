@@ -196,6 +196,11 @@ export function applyProbe(db, cfg, id, result, now = Date.now()) {
       }
       return { ok: true, views: result.views };
     }
+    // "Aún no hay datos" (video recién subido): se guarda el motivo pero no suma fallo.
+    if (result.retry) {
+      db.prepare("UPDATE evidences SET auto_error = ?, auto_checked_at = ? WHERE id = ?").run(String(result.error || "pendiente").slice(0, 200), now, ev.id);
+      return { ok: false, error: result.error, retry: true };
+    }
     const fails = (ev.auto_fails || 0) + 1;
     const giveUp = fails >= cfg.views.maxFails;
     db.prepare(`UPDATE evidences SET auto_error = ?, auto_checked_at = ?, auto_fails = ?${giveUp ? ", track = 'manual'" : ""}${giveUp && ev.status === "approved" ? ", recount = 1" : ""} WHERE id = ?`)

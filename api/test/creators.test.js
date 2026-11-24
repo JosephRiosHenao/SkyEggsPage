@@ -287,12 +287,86 @@ test("solo se leen redes conocidas por https (nada de URLs internas)", () => {
   assert.equal(trackableSite("https://youtube.com:8443/x"), null);
 });
 
-test("sin yt-dlp instalado, la lectura falla con un motivo claro", async () => {
-  const r = await probeViews(cfg(), "https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+test("sin yt-dlp instalado, TikTok falla con un motivo claro; Instagram no se lee", async () => {
+  const r = await probeViews(cfg(), "https://www.tiktok.com/@a/video/1");
   assert.equal(r.ok, false);
   assert.match(r.error, /yt-dlp/);
   const ig = await probeViews(cfg(), "https://www.instagram.com/reel/1");
   assert.match(ig.error, /no permite/);
+});
+
+// fetch simulado: cada URL que empiece por una clave responde lo indicado
+function fakeFetch(routes) {
+  const calls = [];
+  const impl = async (url) => {
+    calls.push(String(url));
+    const key = Object.keys(routes).find((k) => String(url).startsWith(k));
+    const r = key ? routes[key] : { status: 404 };
+    const body = typeof r.body === "string" ? r.body : JSON.stringify(r.body ?? {});
+    return new Response(r.status === 200 || !r.status ? body : null, { status: r.status || 200, headers: r.location ? { location: r.location } : {} });
+  };
+  return { impl, calls };
+}
+const shortHtml = (views) => `<html><script>var ytInitialData = ${JSON.stringify({ engagementPanels: [{ items: [{ videoDescriptionHeaderRenderer: {
+  channel: { simpleText: "Blexizz" }, views: { simpleText: `${views} views` }, publishDate: { simpleText: "Nov 23, 2026" } } }] }] })};</script></html>`;
+
+test("YouTube: lee las vistas de la página del short, sin claves ni yt-dlp", async () => {
+  const { impl } = fakeFetch({
+    "https://www.youtube.com/shorts/j5HUTIaLEEw": { body: shortHtml("1,796") },
+    "https://www.youtube.com/oembed": { body: { title: "recomendando juegos", author_name: "Blexizz", author_url: "https://www.youtube.com/@blexizzYT" } },
+  });
+  const r = await probeViews(cfg(), "https://youtube.com/shorts/j5HUTIaLEEw?si=abc", impl);
+  assert.equal(r.ok, true);
+  assert.equal(r.views, 1796);
+  assert.equal(r.meta.channel, "Blexizz");
+  assert.equal(r.meta.title, "recomendando juegos");
+  assert.equal(r.meta.uploadDate, "2026-11-23");
+});
+
+test("YouTube: si la página pide verificación, usa Return YouTube Dislike", async () => {
+  const { impl, calls } = fakeFetch({
+    "https://www.youtube.com/shorts/": { status: 303, location: "https://www.youtube.com/watch?v=dQw4w9WgXcQ" },
+    "https://www.youtube.com/watch": { status: 302, location: "https://www.google.com/sorry/index?continue=x" },
+    "https://returnyoutubedislikeapi.com/votes": { body: { id: "dQw4w9WgXcQ", viewCount: 1840207238, deleted: false } },
+    "https://www.youtube.com/oembed": { body: { title: "Never Gonna Give You Up", author_name: "Rick Astley" } },
+  });
+  const r = await probeViews(cfg(), "https://www.youtube.com/watch?v=dQw4w9WgXcQ", impl);
+  assert.equal(r.ok, true);
+  assert.equal(r.views, 1840207238);
+  assert.equal(r.meta.channel, "Rick Astley");
+  assert.ok(calls.some((u) => u.includes("returnyoutubedislikeapi.com/votes?videoId=dQw4w9WgXcQ")));
+});
+
+test("YouTube: video recién subido sin datos → reintento que no cuenta como fallo", async () => {
+  const { impl } = fakeFetch({
+    "https://www.youtube.com/shorts/": { status: 303, location: "https://www.youtube.com/watch?v=x" },
+    "https://www.youtube.com/watch": { status: 302, location: "https://www.google.com/sorry/index" },
+    "https://returnyoutubedislikeapi.com/votes": { body: { viewCount: 0, deleted: false } },
+  });
+  const r = await probeViews(cfg(), "https://youtu.be/abcdefghijk", impl);
+  assert.equal(r.ok, false);
+  assert.equal(r.retry, true);
+  assert.match(r.error, /aún no/);
+
+  const db = openDb(":memory:"); const c = cfg();
+  const now = Date.parse("2026-11-20T12:00:00-05:00");
+  seedUser(db, "cre", { creator: true });
+  C.setGrace(c);
+  const e = C.addEvidence(db, "cre", { url: "https://youtu.be/abcdefghijk", publishedOn: "2026-11-18" }, now);
+  for (let i = 0; i < 5; i++) await probeEvidence(db, c, e.id, "x", async () => r, silent, now);
+  const row = db.prepare("SELECT track, auto_fails, auto_error FROM evidences WHERE id = ?").get(e.id);
+  assert.equal(row.track, "auto");
+  assert.equal(row.auto_fails, 0);
+  assert.match(row.auto_error, /aún no/);
+});
+
+test("parseCount entiende los formatos de YouTube", async () => {
+  const { parseCount } = await import("../src/views.js");
+  assert.equal(parseCount("1,234,567 views"), 1234567);
+  assert.equal(parseCount("796"), 796);
+  assert.equal(parseCount("1.2M views"), 1_200_000);
+  assert.equal(parseCount("No views"), 0);
+  assert.ok(Number.isNaN(parseCount("Views")));
 });
 
 test("vistas automáticas: se aprueban, se refrescan y actualizan el bono; si fallan pasan a fijas", async () => {
