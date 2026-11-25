@@ -1,5 +1,5 @@
 // Lectura automática de vistas, libre y sin claves ni cuentas.
-// YouTube: páginas públicas + Return YouTube Dislike (ver probeYouTube). TikTok, Twitch y Kick: yt-dlp. Instagram, Facebook y el resto piden
+// YouTube: páginas públicas + Return YouTube Dislike. TikTok: página + tikwm.com. Twitch y Kick: yt-dlp. Instagram, Facebook y el resto piden
 // sesión: esas evidencias quedan con vistas fijas que pone un moderador.
 import { spawn } from "node:child_process";
 
@@ -193,27 +193,87 @@ async function youtubeApi(cfg, id, fetchImpl) {
 async function probeYouTube(cfg, url, fetchImpl) {
   const id = youtubeId(url);
   if (!id) return { ok: false, error: "no se encontró el id del video" };
-  const steps = [
+  return firstSuccess([
     () => youtubeScrape(cfg, id, fetchImpl),
     () => returnYouTubeDislike(cfg, id, fetchImpl),
     cfg.views.youtubeApiKey ? () => youtubeApi(cfg, id, fetchImpl) : null,
     cfg.views.ytdlpPath ? () => runYtDlp(cfg, url) : null,
-  ].filter(Boolean);
+  ], async (r) => {
+    if (!r.json.title || !r.json.uploader) r.json = { ...(await youtubeOembed(id, fetchImpl)), ...stripEmpty(r.json) };
+    return r;
+  });
+}
+
+// ---------- TikTok sin claves ----------
+// La página de TikTok responde "statusCode 10231" (video no disponible) a IPs de servidor y yt-dlp falla igual.
+// Orden: la página pública (por si un día carga), tikwm.com (API libre sin clave, ~1 consulta/s) y yt-dlp.
+export function tiktokFromPage(html) {
+  const m = html.match(/<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>(.*?)<\/script>/s);
+  if (!m) return null;
+  let d;
+  try { d = JSON.parse(m[1]); } catch { return null; }
+  const detail = d?.__DEFAULT_SCOPE__?.["webapp.video-detail"];
+  const item = detail?.itemInfo?.itemStruct;
+  if (!item || (detail.statusCode && detail.statusCode !== 0)) return null;
+  const views = Number(item.stats?.playCount ?? item.statsV2?.playCount);
+  if (!Number.isFinite(views)) return null;
+  return tiktokJson(views, item.createTime, item.author?.uniqueId, item.author?.nickname, item.desc);
+}
+
+function tiktokJson(views, createTime, handle, nickname, desc) {
+  const t = Number(createTime);
+  const date = Number.isFinite(t) && t > 0 ? new Date(t * 1000 - 5 * 3_600_000).toISOString().slice(0, 10).replace(/-/g, "") : null;
+  return {
+    view_count: views, title: typeof desc === "string" ? desc : null, uploader: nickname || handle || null,
+    channel_url: handle ? `https://www.tiktok.com/@${handle}` : null, upload_date: date,
+  };
+}
+
+async function tiktokPage(cfg, url, fetchImpl) {
+  const res = await fetchImpl(url, { headers: { "Accept-Language": "es-ES,es;q=0.9" }, signal: AbortSignal.timeout(Math.min(cfg.views.timeoutMs, 20_000)) });
+  if (!res.ok) return { ok: false, error: `TikTok respondió ${res.status}` };
+  const j = tiktokFromPage(await res.text());
+  return j ? { ok: true, json: j } : { ok: false, error: "TikTok no mostró el video al servidor" };
+}
+
+async function tikwm(cfg, url, fetchImpl) {
+  const res = await fetchImpl(`https://www.tikwm.com/api/?url=${encodeURIComponent(url)}`, {
+    headers: { Accept: "application/json" }, signal: AbortSignal.timeout(Math.min(cfg.views.timeoutMs, 25_000)),
+  });
+  const j = await res.json().catch(() => null);
+  if (!res.ok || !j) return { ok: false, error: `tikwm: ${res.status}` };
+  const d = j.data;
+  if (j.code !== 0 || !d) {
+    // Límite de consultas: se reintenta en el siguiente ciclo sin contar como fallo.
+    if (/limit|frequen|too many/i.test(j.msg || "")) return { ok: false, retry: true, error: "TikTok: demasiadas consultas; se vuelve a intentar" };
+    return { ok: false, error: `TikTok: ${String(j.msg || "video no encontrado").slice(0, 120)}` };
+  }
+  const views = Number(d.play_count);
+  if (!Number.isFinite(views)) return { ok: false, error: "TikTok no muestra las vistas" };
+  return { ok: true, json: tiktokJson(views, d.create_time, d.author?.unique_id, d.author?.nickname, d.title) };
+}
+
+async function probeTikTok(cfg, url, fetchImpl) {
+  return firstSuccess([
+    () => tiktokPage(cfg, url, fetchImpl),
+    () => tikwm(cfg, url, fetchImpl),
+    cfg.views.ytdlpPath ? () => runYtDlp(cfg, url) : null,
+  ]);
+}
+
+// Prueba cada fuente en orden y devuelve la primera con vistas. Un "todavía no" (retry) gana a los errores.
+async function firstSuccess(steps, enrich) {
   const errors = [];
-  let retry = false;
-  for (const step of steps) {
+  let retry = null;
+  for (const step of steps.filter(Boolean)) {
     let r;
     try { r = await step(); } catch (e) { r = { ok: false, error: e.name === "TimeoutError" ? "tardó demasiado" : e.message }; }
-    if (r.ok && Number.isFinite(Number(r.json?.view_count))) {
-      if (!r.json.title || !r.json.uploader) r.json = { ...(await youtubeOembed(id, fetchImpl)), ...stripEmpty(r.json) };
-      return r;
-    }
-    if (r.retry) retry = true;
+    if (r.ok && Number.isFinite(Number(r.json?.view_count))) return enrich ? enrich(r) : r;
+    if (r.retry && !retry) retry = r.error;
     if (r.error) errors.push(r.error);
   }
-  // Si alguna fuente dijo "todavía no", se prefiere ese motivo (no cuenta como fallo).
-  if (retry) return { ok: false, retry: true, error: errors.find((e) => /aún no/.test(e)) };
-  return { ok: false, error: errors[0] || "no se pudieron leer las vistas" };
+  if (retry) return { ok: false, retry: true, error: retry };
+  return { ok: false, error: errors.find((e) => !/yt-dlp no disponible/.test(e)) || errors[0] || "no se pudieron leer las vistas" };
 }
 
 const stripEmpty = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== null && v !== undefined && v !== ""));
@@ -223,7 +283,7 @@ export async function probeViews(cfg, url, fetchImpl = fetch) {
   const site = trackableSite(url);
   if (!site) return { ok: false, error: "esta red no permite leer vistas sin cuenta" };
   if (!cfg.views.enabled) return { ok: false, error: "lectura automática apagada" };
-  const r = site === "youtube" ? await probeYouTube(cfg, url, fetchImpl) : await runYtDlp(cfg, url);
+  const r = site === "youtube" ? await probeYouTube(cfg, url, fetchImpl) : site === "tiktok" ? await probeTikTok(cfg, url, fetchImpl) : await runYtDlp(cfg, url);
   if (!r.ok) return { ok: false, error: r.error, ...(r.retry ? { retry: true } : {}) };
   const j = r.json;
   const views = Number(j.view_count);

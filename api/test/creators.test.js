@@ -304,8 +304,8 @@ test("solo se leen redes conocidas por https (nada de URLs internas)", () => {
   assert.equal(trackableSite("https://youtube.com:8443/x"), null);
 });
 
-test("sin yt-dlp instalado, TikTok falla con un motivo claro; Instagram no se lee", async () => {
-  const r = await probeViews(cfg(), "https://www.tiktok.com/@a/video/1");
+test("sin yt-dlp instalado, Twitch falla con un motivo claro; Instagram no se lee", async () => {
+  const r = await probeViews(cfg(), "https://www.twitch.tv/videos/1");
   assert.equal(r.ok, false);
   assert.match(r.error, /yt-dlp/);
   const ig = await probeViews(cfg(), "https://www.instagram.com/reel/1");
@@ -375,6 +375,43 @@ test("YouTube: video recién subido sin datos → reintento que no cuenta como f
   assert.equal(row.track, "auto");
   assert.equal(row.auto_fails, 0);
   assert.match(row.auto_error, /aún no/);
+});
+
+test("TikTok: si TikTok bloquea al servidor (10231), lee las vistas de tikwm", async () => {
+  const blocked = `<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">${JSON.stringify({ __DEFAULT_SCOPE__: { "webapp.video-detail": { statusCode: 10231 } } })}</script>`;
+  const { impl, calls } = fakeFetch({
+    "https://www.tiktok.com/@pochi_dev/video/7711134946613677319": { body: blocked },
+    "https://www.tikwm.com/api/": { body: { code: 0, msg: "success", data: { play_count: 18484, create_time: 1795388523, title: "Sky Eggs", author: { unique_id: "pochi_dev", nickname: "PochiDev" } } } },
+  });
+  const r = await probeViews(cfg(), "https://www.tiktok.com/@pochi_dev/video/7711134946613677319?is_from_webapp=1", impl);
+  assert.equal(r.ok, true);
+  assert.equal(r.views, 18484);
+  assert.equal(r.meta.channel, "PochiDev");
+  assert.equal(r.meta.channelUrl, "https://www.tiktok.com/@pochi_dev");
+  assert.equal(r.meta.uploadDate, "2026-11-22");
+  assert.ok(calls.some((u) => u.startsWith("https://www.tikwm.com/api/?url=")));
+});
+
+test("TikTok: la página pública se usa cuando sí carga", async () => {
+  const ok = `<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">${JSON.stringify({ __DEFAULT_SCOPE__: { "webapp.video-detail": { statusCode: 0, itemInfo: { itemStruct: { desc: "hola", createTime: "1795388523", stats: { playCount: 777 }, author: { uniqueId: "a", nickname: "A" } } } } } })}</script>`;
+  const { impl, calls } = fakeFetch({ "https://www.tiktok.com/@a/video/1": { body: ok } });
+  const r = await probeViews(cfg(), "https://www.tiktok.com/@a/video/1", impl);
+  assert.equal(r.views, 777);
+  assert.ok(!calls.some((u) => u.includes("tikwm")));
+});
+
+test("Volver a leer: una evidencia que pasó a fijas por fallar vuelve a automática si ya se lee", async () => {
+  const db = openDb(":memory:"); const c = cfg();
+  const now = Date.parse("2026-11-20T12:00:00-05:00");
+  seedUser(db, "cre", { creator: true });
+  C.setGrace(c);
+  const e = C.addEvidence(db, "cre", { url: "https://www.tiktok.com/@a/video/1", publishedOn: "2026-11-18" }, now);
+  const bad = async () => ({ ok: false, error: "Video not available, status code 10231" });
+  for (let i = 0; i < c.views.maxFails; i++) await probeEvidence(db, c, e.id, "x", bad, silent, now);
+  assert.equal(db.prepare("SELECT track FROM evidences WHERE id = ?").get(e.id).track, "manual");
+  await probeEvidence(db, c, e.id, "x", async () => ({ ok: true, views: 18484, meta: {} }), silent, now);
+  const row = db.prepare("SELECT track, auto_views, auto_fails FROM evidences WHERE id = ?").get(e.id);
+  assert.deepEqual({ ...row }, { track: "auto", auto_views: 18484, auto_fails: 0 });
 });
 
 test("parseCount entiende los formatos de YouTube", async () => {
@@ -716,4 +753,30 @@ test("aprobado sin estar en el servidor de Discord: el rol queda pendiente y se 
   assert.equal((await sweepPendingRoles(db, c, fake, silent)).checked, 0); // ya no está pendiente
   // Su cuenta de Roblox quedó como la cuenta del panel.
   assert.equal(C.getDiscordUser(db, uid).roblox.userId, 777);
+});
+
+test("HTTP: la bienvenida del programa se confirma una sola vez y solo con el rol", async () => {
+  const fake = fakeDiscord({ cre: [ROLE.creator], fan: [], mod: [ROLE.moderator] });
+  await withServer(async (base, db, c) => {
+    const cre = await loginLinked(base, db, c, "cre");
+    let me = await (await fetch(`${base}/api/me`, { headers: { cookie: cre } })).json();
+    assert.deepEqual(me.onboarding, { creator: false, staff: false });
+    assert.equal((await fetch(`${base}/api/onboarding/ack`, json({ program: "staff" }, cre))).status, 403);
+    assert.equal((await fetch(`${base}/api/onboarding/ack`, json({ program: "creator" }, cre))).status, 200);
+    assert.equal((await fetch(`${base}/api/onboarding/ack`, json({ program: "creator" }, cre))).status, 200); // repetir no falla
+    me = await (await fetch(`${base}/api/me`, { headers: { cookie: cre } })).json();
+    assert.equal(me.onboarding.creator, true);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM onboarding").get().n, 1);
+
+    const fan = await loginLinked(base, db, c, "fan");
+    assert.equal((await fetch(`${base}/api/onboarding/ack`, json({ program: "creator" }, fan))).status, 403);
+    assert.equal((await fetch(`${base}/api/onboarding/ack`, json({ program: "otro" }, fan))).status, 403);
+    const mod = await loginLinked(base, db, c, "mod");
+    assert.equal((await fetch(`${base}/api/onboarding/ack`, json({ program: "staff" }, mod))).status, 200);
+
+    // Los videos de la bienvenida vienen con cada programa.
+    assert.equal((await (await fetch(`${base}/api/creators/program`)).json()).welcomeVideos.length, 2);
+    const { publicStaffProgram } = await import("../src/staffProgram.js");
+    assert.equal(publicStaffProgram({ staff: {} }).welcomeVideos[0].id, "fjf0TcLgY0Q");
+  }, fake);
 });

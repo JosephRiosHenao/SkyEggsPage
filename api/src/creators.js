@@ -256,7 +256,10 @@ export function applyProbe(db, cfg, id, result, now = Date.now()) {
   if (!ev) return null;
   return tx(db, () => {
     if (result.ok) {
-      db.prepare("UPDATE evidences SET auto_views = ?, auto_checked_at = ?, auto_error = NULL, auto_fails = 0, auto_meta = ? WHERE id = ?")
+      // Si había pasado a vistas fijas solo por fallar ("Volver a leer" tras arreglar la lectura) y aún no
+      // está aprobada, vuelve a refrescarse sola.
+      const revive = ev.track === "manual" && (ev.auto_fails || 0) >= cfg.views.maxFails && ev.status !== "approved" && trackableSite(ev.url);
+      db.prepare(`UPDATE evidences SET auto_views = ?, auto_checked_at = ?, auto_error = NULL, auto_fails = 0, auto_meta = ?${revive ? ", track = 'auto'" : ""} WHERE id = ?`)
         .run(result.views, now, JSON.stringify(result.meta || {}), ev.id);
       if (ev.status === "approved" && ev.track === "auto") {
         db.prepare("UPDATE evidences SET views = ? WHERE id = ?").run(result.views, ev.id);

@@ -505,7 +505,7 @@
 
     guia(s) {
       const boxes = [...$("guide-tpl").content.querySelectorAll(":scope > .box")];
-      s.replaceChildren(...boxes.filter((b) => !b.dataset.role || (b.dataset.role === "admin" ? isAdmin() : isMod())).map((b) => b.cloneNode(true)));
+      s.replaceChildren(...welcomeBoxes(), ...boxes.filter((b) => !b.dataset.role || (b.dataset.role === "admin" ? isAdmin() : isMod())).map((b) => b.cloneNode(true)));
     },
 
     "mod-solicitudes": modPage((b) => modApplications(b), "Solicitudes para entrar al programa de creadores."),
@@ -1705,6 +1705,130 @@
     }
   }
 
+  // ---------- Bienvenida al programa (modal con videos, una sola vez) ----------
+  // Sale al entrar por primera vez después de ser aprobado (creador o staff). Hay que marcar que se vio
+  // y se entendió todo; queda guardado en la API. El mismo contenido vive en la pestaña Guía.
+  const RANK_LABEL = { Helper: "Helper", ModeratorJr: "Moderator Jr", Moderator: "Moderator" };
+  const fmtN = (v) => Number(v || 0).toLocaleString("es-CO");
+  const RARITY = { Epic: "épica", Legendary: "legendaria", Mythic: "mítica" };
+  const RARITY_PL = { Epic: "épicas", Legendary: "legendarias", Mythic: "míticas" };
+  const welcomeFor = () => [
+    roles().creator && !me?.onboarding?.creator && "creator",
+    (roles().staffLinked || (roles().moderator && !isAdmin())) && !me?.onboarding?.staff && "staff",
+  ].filter(Boolean);
+
+  function videoEmbed(v) {
+    const src = v.site === "tiktok" ? `https://www.tiktok.com/player/v1/${v.id}?description=1` : `https://www.youtube-nocookie.com/embed/${v.id}?rel=0&modestbranding=1`;
+    return el("figure", { class: `wvideo wvideo--${v.site}` },
+      el("div", { class: "wvideo__frame" }, el("iframe", { src, title: v.title, loading: "lazy", allow: "encrypted-media; picture-in-picture; fullscreen", referrerpolicy: "strict-origin-when-cross-origin" })),
+      el("figcaption", {}, v.title, " · ", link(v.url, v.site === "tiktok" ? "Abrir en TikTok" : "Abrir en YouTube")));
+  }
+  const wsec = (title, ...kids) => el("section", { class: "wsec" }, el("h3", {}, title), ...kids);
+  const wlist = (items) => el("ul", { class: "wlist" }, ...items.filter(Boolean).map((x) => el("li", {}, x)));
+
+  function creatorWelcome() {
+    const pg = program || {};
+    const levels = pg.levels || [];
+    const packs = pg.packs || [];
+    const rb = pg.robux || { minViews: 10000, per10k: 100, maxPerVideo: 1000 };
+    const grace = pg.claimGraceDays || { week: 3, month: 5 };
+    return [
+      el("p", { class: "wlead" }, "¡Ya eres parte del Programa de Creadores de Sky Eggs! Mira los videos y lee esto con calma: aquí está todo lo que necesitas para ganar premios grabando el juego."),
+      el("div", { class: "wvideos" }, ...(pg.welcomeVideos || []).map(videoEmbed)),
+      wsec("🎬 Cómo funciona, paso a paso", el("ol", { class: "wlist" },
+        el("li", {}, "Graba y publica videos o directos de Sky Eggs en tus redes."),
+        el("li", {}, "Sube cada uno en la pestaña “Evidencias”: el enlace y la fecha en que lo publicaste. Cada enlace se sube una sola vez."),
+        el("li", {}, "Un moderador lo revisa. En YouTube, TikTok, Twitch y Kick las vistas se leen y se actualizan solas; en otras redes las escribe el moderador."),
+        el("li", {}, `Reclama tus premios en “Mis metas”: una vez por semana (hasta ${grace.week} días después del domingo) y una vez por mes (hasta ${grace.month} días después de que termine).`),
+        el("li", {}, "Entra al juego y abre el buzón del Lobby: ahí llega tu premio."))),
+      levels.length ? wsec("⭐ Tu rango sube solo", el("p", {}, "Depende de las vistas aprobadas de la semana (lunes a domingo, hora de Colombia):"),
+        el("div", { class: "wchips" }, ...levels.map((l) => el("span", { class: "wchip" }, `${l.emoji} ${l.name}`, el("small", {}, l.minWeekViews ? `${fmtN(l.minWeekViews)} vistas` : "al entrar")))),
+        el("p", { class: "small" }, "Cada rango trae comandos nuevos en el juego (pestaña “Comandos de creador”).")) : null,
+      packs.length ? wsec("🎁 Premios que puedes reclamar", el("div", { class: "tbl-wrap" }, el("table", { class: "tbl" },
+        el("thead", {}, el("tr", {}, ...["Periodo", "Vistas", "Videos", "Premio"].map((h) => el("th", {}, h)))),
+        el("tbody", {}, ...packs.map((p) => el("tr", {},
+          el("td", {}, p.period === "week" ? "Semana" : "Mes"), el("td", {}, fmtN(p.minViews)), el("td", {}, String(p.minVideos)),
+          el("td", {}, [`${p.vipDays} días de VIP`, `boosts x2 por ${p.boostHours} h`, ...(p.bonus || []).map((b) => b.q > 1 ? `${b.q} mascotas ${RARITY_PL[b.rarity] || b.rarity}` : `1 mascota ${RARITY[b.rarity] || b.rarity}`), p.extra].filter(Boolean).join(" · ")))))))) : null,
+      wsec("💸 Bono de Robux", el("p", {}, `${fmtN(rb.per10k)} Robux por cada ${fmtN(10000)} vistas de un video (desde ${fmtN(rb.minViews)} y hasta ${fmtN(rb.maxPerVideo)} por video). Lo pides desde la evidencia y lo aprueban un moderador y el admin.`)),
+      wsec("⚠️ Importante", wlist([
+        "Si una semana entera no subes ningún video, vuelves a Creator. Con 2 semanas seguidas sin videos sales del programa y tienes que volver a aplicar.",
+        "Nada de vistas compradas ni videos de otros: se rechazan y puedes salir del programa.",
+        "Usa tus comandos con respeto: ;Kick solo con quien rompe las reglas, nunca por diversión.",
+        "Todo queda registrado. Si tienes dudas, pregunta en el Discord.",
+      ])),
+    ];
+  }
+
+  function staffWelcome() {
+    const sp = staffProgram || {};
+    const rank = staffRank() || (roles().moderator ? "Moderator" : "Helper");
+    const r = (sp.ranks || []).find((x) => x.key === rank);
+    const must = (sp.tasks || []).filter((t) => (t.min?.[rank] || 0) > 0);
+    const extra = (sp.tasks || []).filter((t) => !(t.min?.[rank] > 0) && (t.goal?.[rank] || 0) > 0);
+    return [
+      el("p", { class: "wlead" }, `Ahora eres ${r ? `${r.emoji} ${r.name}` : RANK_LABEL[rank] || rank}. Mira el video y lee esto con calma: así funcionan tu rango, tus tareas y las reglas.`),
+      el("div", { class: "wvideos" }, ...(sp.welcomeVideos || []).map(videoEmbed)),
+      r ? wsec("🛡️ Tu trabajo", el("p", {}, r.summary), wlist(r.discord || [])) : null,
+      must.length || extra.length ? wsec("✅ Tus tareas del mes",
+        must.length ? el("p", {}, el("strong", {}, "Cuotas obligatorias (mantienen tu rango):")) : null,
+        must.length ? wlist(must.map((t) => `${t.name}: ${t.min[rank]} ${t.unit}${t.goal?.[rank] > t.min[rank] ? ` (meta opcional ${t.goal[rank]})` : ""}.`)) : null,
+        extra.length ? el("p", {}, el("strong", {}, "Metas opcionales (suman desempeño para ascender):")) : null,
+        extra.length ? wlist(extra.map((t) => `${t.name}: ${t.goal[rank]} ${t.unit}.`)) : null,
+        el("p", { class: "small" }, "Tu avance se ve en “Mis tareas del mes”. El tiempo activo en el juego (el AFK no cuenta) y la actividad en el Discord suman a tu cuota semanal.")) : null,
+      wsec("📏 Reglas del staff", wlist(sp.rules || [])),
+      wsec("⬆️ Ascensos y excusas", wlist([
+        sp.promotions ? `Moderator Jr: ${sp.promotions.ModeratorJr}. Moderator: ${sp.promotions.Moderator}.` : null,
+        `¿No puedes cumplir (exámenes, viaje, enfermedad)? Presenta una excusa en “Excusas” (hasta ${sp.excuseDays ?? 5} días después).`,
+        `Si pasas ${sp.failMonthsToRemove ?? 2} meses seguidos sin cumplir las cuotas obligatorias, bajas un rango.`,
+        "Tus comandos y funciones están en “Comandos y funciones” y en el juego con ;StaffHelp.",
+      ])),
+    ];
+  }
+
+  function openWelcome(programKey) {
+    return new Promise((resolve) => {
+      const content = programKey === "creator" ? creatorWelcome() : staffWelcome();
+      const title = programKey === "creator" ? "🎬 Bienvenido al Programa de Creadores" : "🛡️ Bienvenido al staff de Sky Eggs";
+      const nVideos = ((programKey === "creator" ? program : staffProgram)?.welcomeVideos || []).length;
+      const check = el("input", { type: "checkbox", id: "welcome-ok" });
+      const ok = el("button", { class: "btn btn--yolk btn--lg", type: "button", disabled: true }, "✅ ¡Entendido!");
+      check.addEventListener("change", () => { ok.disabled = !check.checked; });
+      const dlg = el("dialog", { class: "welcome", "aria-labelledby": "welcome-title" },
+        el("div", { class: "welcome__body" }, el("h2", { id: "welcome-title" }, title), ...content),
+        el("footer", { class: "welcome__foot" },
+          el("label", { class: "check", for: "welcome-ok" }, check, `${nVideos === 1 ? "Vi el video" : nVideos ? "Vi los videos" : "Leí todo"}${nVideos ? ", leí todo" : ""} y entendí cómo funciona el programa. Me comprometo a cumplir las reglas.`),
+          ok));
+      // Es obligatorio confirmar: Esc no lo cierra.
+      dlg.addEventListener("cancel", (e) => e.preventDefault());
+      ok.addEventListener("click", async () => {
+        ok.disabled = true;
+        try {
+          await api("/api/onboarding/ack", { program: programKey });
+          me.onboarding = { ...(me.onboarding || {}), [programKey]: true };
+          dlg.close(); dlg.remove();
+          flash("¡Listo! Puedes volver a verlo cuando quieras en la pestaña Guía.", "ok");
+          resolve(true);
+        } catch (e) { flash(errText(e), "bad"); ok.disabled = !check.checked; }
+      });
+      document.body.append(dlg);
+      dlg.showModal();
+      dlg.querySelector(".welcome__body").scrollTop = 0;
+    });
+  }
+  let welcoming = false;
+  async function maybeWelcome() {
+    if (welcoming) return;
+    welcoming = true;
+    try { for (const k of welcomeFor()) await openWelcome(k); } finally { welcoming = false; }
+  }
+  // Copia de la bienvenida en la pestaña Guía (sin casilla).
+  function welcomeBoxes() {
+    const out = [];
+    if (isCreator()) out.push(el("div", { class: "box" }, el("h2", {}, "🎬 Bienvenida al Programa de Creadores"), ...creatorWelcome()));
+    if (roles().staffLinked || roles().moderator) out.push(el("div", { class: "box" }, el("h2", {}, "🛡️ Bienvenida al staff"), ...staffWelcome()));
+    return out;
+  }
+
   async function start() {
     const params = new URLSearchParams(location.search);
     const loginErr = params.get("error");
@@ -1746,6 +1870,7 @@
     renderNav();
     if (isModJr()) loadQueue().catch(() => {});
     show((location.hash || "#inicio").slice(1));
+    maybeWelcome();
   }
 
   // Tema claro / oscuro (botón arriba a la derecha). La elección se guarda en este navegador.

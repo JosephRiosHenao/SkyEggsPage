@@ -427,6 +427,12 @@ export function openDb(path) {
       created_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS review_posts_ref ON review_posts(kind, ref, status);
+    -- Bienvenida del programa (modal con videos): se confirma una sola vez por programa (2026-11-24).
+    CREATE TABLE IF NOT EXISTS onboarding (
+      discord_id TEXT NOT NULL, program TEXT NOT NULL,   -- creator | staff
+      acked_at INTEGER NOT NULL,
+      PRIMARY KEY (discord_id, program)
+    );
   `);
   return db;
 }
