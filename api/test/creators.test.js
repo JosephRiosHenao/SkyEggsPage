@@ -780,3 +780,42 @@ test("HTTP: la bienvenida del programa se confirma una sola vez y solo con el ro
     assert.equal(publicStaffProgram({ staff: {} }).welcomeVideos[0].id, "fjf0TcLgY0Q");
   }, fake);
 });
+
+test("HTTP: aprobar un video lo anuncia solo en el canal de Discord (sin reenviarlo a mano)", async () => {
+  const discord = fakeDiscord({ mod: [ROLE.moderator] });
+  const posts = [];
+  const fake = async (url, init = {}) => {
+    const u = String(url);
+    if (u.includes("/channels/") && u.endsWith("/messages") && init.method === "POST") { posts.push({ url: u, body: JSON.parse(init.body) }); return { ok: true, status: 200, json: async () => ({ id: "9001" }) }; }
+    return discord(url, init);
+  };
+  await withServer(async (base, db, c) => {
+    const mod = await loginLinked(base, db, c, "mod");
+    c.discord = { ...c.discord, botToken: "bot-token", videoChannel: "1560771030228799510", videoPingRole: "" };
+    seedUser(db, "cre", {}); seedRoblox(db, c, 777, "LunaYT");
+    const { id: appId } = C.submitApplication(db, "cre", { age13: true, robloxUserId: 777, about: "Hago videos de Sky Eggs cada semana!", platforms: [{ type: "YouTube", url: "https://youtube.com/@luna" }] });
+    C.reviewApplication(db, actor("otro"), { id: appId, action: "approve" });
+    const today = new Date(Date.now() - 5 * 3600_000).toISOString().slice(0, 10);
+    const ev = C.addEvidence(db, "cre", { kind: "video", platform: "YouTube", url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ", publishedOn: today, title: "Huevo ABSURDO" });
+    const r = await fetch(`${base}/api/mod/evidence`, json({ id: ev.id, action: "approve", mode: "fixed", views: 3200 }, mod));
+    assert.equal(r.status, 200);
+    assert.equal((await r.json()).status, "approved");
+    for (let i = 0; i < 20 && !db.prepare("SELECT announce_msg FROM evidences WHERE id = ?").get(ev.id).announce_msg; i++) await new Promise((ok) => setTimeout(ok, 20));
+    const sent = posts.filter((p) => p.url.includes("/channels/1560771030228799510/messages"));
+    assert.equal(sent.length, 1, "se publica una sola vez al aprobar");
+    assert.equal(sent[0].body.embeds[0].title, "Huevo ABSURDO");
+    assert.equal(db.prepare("SELECT announce_msg FROM evidences WHERE id = ?").get(ev.id).announce_msg, "9001");
+  }, fake);
+});
+
+test("reviewEvidence devuelve el estado final", () => {
+  const db = openDb(":memory:"); const c = cfg();
+  seedUser(db, "cre", {}); seedRoblox(db, c, 778, "Otro");
+  const { id: appId } = C.submitApplication(db, "cre", { age13: true, robloxUserId: 778, about: "Hago videos de Sky Eggs cada semana!", platforms: [{ type: "YouTube", url: "https://youtube.com/@otro" }] });
+  C.reviewApplication(db, actor("mod"), { id: appId, action: "approve" });
+  const today = new Date(Date.now() - 5 * 3600_000).toISOString().slice(0, 10);
+  const a = C.addEvidence(db, "cre", { kind: "video", platform: "YouTube", url: "https://www.youtube.com/watch?v=aaaaaaaaaaa", publishedOn: today });
+  const b = C.addEvidence(db, "cre", { kind: "video", platform: "YouTube", url: "https://www.youtube.com/watch?v=bbbbbbbbbbb", publishedOn: today });
+  assert.equal(C.reviewEvidence(db, actor("mod"), { id: a.id, action: "approve", mode: "fixed", views: 10 }).status, "approved");
+  assert.equal(C.reviewEvidence(db, actor("mod"), { id: b.id, action: "reject" }).status, "rejected");
+});

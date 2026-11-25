@@ -569,7 +569,8 @@ export function reviewEvidence(db, actor, body, now = Date.now()) {
       db.prepare("UPDATE bonuses SET views = ?, robux = ? WHERE evidence_id = ? AND status IN ('pending_mod','pending_admin')").run(views, robuxFor(views), ev.id);
     }
     audit(db, actor, `evidence.${action}`, nameOf(db, ev.discord_id), { id: ev.id, url: ev.url, before: ev.views, views: action === "reject" ? null : views, vistas: action === "reject" ? null : auto ? "automáticas" : "fijas", note: note(body) });
-    return { ok: true };
+    // El estado final hace falta para anunciar el video en Discord al aprobarlo (app.js creator_evidence).
+    return { ok: true, status: action === "reject" ? "rejected" : "approved" };
   });
 }
 

@@ -199,6 +199,13 @@ test("HTTP: botones firmados, alerta desde el juego y catálogo de imágenes", a
     assert.equal(list.items[0].image, "https://skyeggs.pro/api/media/asset/84731167730121");
     const alert = await (await game("/api/game/egg-alert", { key: "j:9", asset: "Moon Egg", rarity: "Legendary", iconId: "84731167730121", place: "Level3", jobId: "j", placeId: 1, players: 1, maxPlayers: 12 })).json();
     assert.equal(alert.ok, true);
+    // Servidor privado (VIP/reservado): no se guarda ni se publica en Discord.
+    const before = net.calls.filter((x) => x.method === "POST" && x.url.includes(`/channels/${c.discord.eggChannel}/messages`)).length;
+    const priv = await (await game("/api/game/egg-alert", { key: "vip:1", asset: "Moon Egg", rarity: "Legendary", place: "Level3", jobId: "vip", placeId: 1, players: 2, maxPlayers: 12, privateServer: true })).json();
+    assert.equal(priv.skipped, "private_server");
+    await wait(60);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM egg_alerts WHERE alert_key = 'vip:1'").get().n, 0);
+    assert.equal(net.calls.filter((x) => x.method === "POST" && x.url.includes(`/channels/${c.discord.eggChannel}/messages`)).length, before);
     const press = await fetch(`${base}/api/discord/interactions`, signed({ type: 3, application_id: "app", token: "tok", locale: "es-ES", data: { custom_id: "estats" }, member: { user: { id: "5" }, roles: [] } }));
     const j = await press.json();
     assert.equal(j.type, 4);
