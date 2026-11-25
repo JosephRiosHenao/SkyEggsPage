@@ -251,7 +251,8 @@ Página pública: `/staff/` (generada con `node scripts/build-staff-page.mjs` de
   - Las metas dan el **desempeño** (%) que se pide para ascender.
   - Sanciones, revisiones, invitaciones, eventos y bugs son solo opcionales.
 - **Bajada de rango**: con 2 meses seguidos sin las cuotas obligatorias (y sin excusa aprobada en los 5 días de plazo), baja un rango (Moderator → Moderator Jr → Helper → fuera).
-- **Anuncios en Discord** (`api/src/announce.js`): el bot escribe en `DISCORD_ANNOUNCE_CHANNEL` y menciona al rango que corresponde.
+- **Anuncios en Discord** (`api/src/announce.js`): el bot escribe en `DISCORD_ANNOUNCE_CHANNEL` (por defecto `1565510042851999834`) y menciona al rango que corresponde.
+- **Tarjetas de revisión** (`api/src/reviews.js`): solicitudes, vinculaciones, evidencias y excusas de creadores y staff se publican en ese mismo canal. Al aprobar o rechazar en el panel, la tarjeta se edita sola e indica quién la resolvió. Botones: «Lo reviso yo» (se libera con «Liberar») y «Ver detalles» (solo staff). Requiere el bot con permiso para editar sus mensajes.
   - Avisos: solicitudes y videos de creadores, bonos, solicitudes de Helper, excusas, ascensos, reportes del juego, bienvenidas y el recordatorio de vincular.
   - Cada aviso se activa o desactiva y elige a quién mencionar en Ajustes. Las menciones del mismo aviso se espacian 30 min.
   - El bot necesita «Enviar mensajes» y poder mencionar esos roles.

@@ -415,6 +415,18 @@ export function openDb(path) {
       evaluated_at INTEGER NOT NULL,
       PRIMARY KEY (discord_id, month)
     );
+    -- Tarjetas de revisión en el canal del staff (se editan solas al resolverse).
+    CREATE TABLE IF NOT EXISTS review_posts (
+      id INTEGER PRIMARY KEY,
+      kind TEXT NOT NULL, ref TEXT NOT NULL,
+      channel_id TEXT, message_id TEXT,
+      payload TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'open',      -- open | approved | rejected
+      claimed_id TEXT, claimed_name TEXT,
+      resolved_by TEXT, resolved_at INTEGER, resolve_note TEXT,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS review_posts_ref ON review_posts(kind, ref, status);
   `);
   return db;
 }

@@ -54,7 +54,7 @@ export const config = {
     },
     // Programa de staff (2026-11-23): roles de Discord de cada rango.
     // Canal de anuncios del staff (el bot escribe y menciona al rango que corresponde).
-    announceChannel: process.env.DISCORD_ANNOUNCE_CHANNEL || "1566631711910133860",
+    announceChannel: process.env.DISCORD_ANNOUNCE_CHANNEL || "1565510042851999834",
     // Bot más completo (2026-11-24): clave pública para los botones (Interactions Endpoint URL =
     // <sitio>/api/discord/interactions), canal de videos aprobados y canal de alertas de huevos.
     publicKey: process.env.DISCORD_PUBLIC_KEY || "",
