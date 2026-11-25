@@ -180,7 +180,7 @@ export function startLifecycle({ db, cfg, fetchImpl = fetch, log = console }) {
       for (const days of [3, 1]) {
         const left = cfg.staff.linkDeadline - Date.now();
         if (left > 0 && left <= days * 86_400_000) {
-          const pending = db.prepare("SELECT COUNT(*) AS n FROM staff_legacy_discord WHERE status = 'pending'").get().n + db.prepare("SELECT COUNT(*) AS n FROM staff_legacy_game WHERE status = 'notified'").get().n;
+          const pending = S.legacyPendingCount(db);
           if (pending) await announceOnce(db, cfg, `link_deadline_${cfg.staff.linkDeadline}_${days}`, "link_deadline",
             { text: `⏳ **Staff antiguo**: ${days === 1 ? "mañana" : `en ${days} días`} vence el plazo para vincular Discord + Roblox. Entra a ${cfg.siteUrl}/creadores/panel/ con Discord y vincula tu cuenta, o pierdes el rango en el juego y en Discord.` }, fetchImpl);
         }
@@ -589,7 +589,21 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
     "GET /api/me": async (req) => {
       const u = currentUser(req);
       if (!u) return { status: 200, body: { user: null, discord: discordEnabled(cfg) } };
-      return { user: u, discord: true, application: C.myApplication(db, u.id), staffApplication: S.myStaffApplication(db, u.id) };
+      const acked = new Set(db.prepare("SELECT program FROM onboarding WHERE discord_id = ?").all(String(u.id)).map((r) => r.program));
+      return { user: u, discord: true, application: C.myApplication(db, u.id), staffApplication: S.myStaffApplication(db, u.id),
+        onboarding: { creator: acked.has("creator"), staff: acked.has("staff") } };
+    },
+    // Bienvenida: el creador o el staff confirma que vio los videos y entendió el programa (una vez).
+    "POST /api/onboarding/ack": async (req) => {
+      checkOrigin(req);
+      const u = requireUser(req);
+      const b = await readJson(req, 128);
+      const program = b?.program;
+      const r = u.roles;
+      const allowed = program === "creator" ? r.creator : program === "staff" ? (r.staffLinked || (r.moderator && !r.admin)) : false;
+      if (!allowed) throw new HttpError(403, "forbidden");
+      db.prepare("INSERT OR IGNORE INTO onboarding (discord_id, program, acked_at) VALUES (?, ?, ?)").run(String(u.id), program, Date.now());
+      return { ok: true };
     },
 
     // ----- Programa de creadores -----

@@ -346,3 +346,18 @@ test("diagnóstico del bot: explica el 404 de Discord", async () => {
   const d2 = await diagnoseBot(c, { "Content Creator": ROLE.creator }, null, ok);
   assert.equal(d2.ok, true, JSON.stringify(d2.checks));
 });
+
+test("staff antiguo que entró por la solicitud de Helper deja de salir como «sin vincular»", () => {
+  const db = openDb(":memory:"); const c = cfg(); const t = Date.parse("2026-11-24T10:00:00-05:00");
+  // El bot lo vio con rol de staff en Discord y el juego con su etiqueta: queda pendiente en las dos listas.
+  user(db, "40001");
+  S.syncDiscordStaff(db, c, [{ id: "40001", username: "viejo", roles: [STAFF_ROLES.Helper] }], t);
+  play(db, c, 4001, "Viejo_Staff", { staffTier: 1 }, t);
+  assert.equal(S.legacyPendingCount(db), 2);
+  // En vez de "Vincular mi cuenta" llenó el formulario y se lo aprobaron.
+  const app = S.submitStaffApplication(db, "40001", { robloxUserId: 4001, answers: answers(), age13: true }, t);
+  S.reviewStaffApplication(db, actor("adm", "admin"), { id: app.id, action: "approve" }, t);
+  assert.equal(S.legacyPendingCount(db), 0);
+  assert.equal(db.prepare("SELECT status FROM staff_legacy_discord WHERE discord_id = '40001'").get().status, "linked");
+  assert.equal(db.prepare("SELECT status FROM staff_legacy_game WHERE roblox_user_id = 4001").get().status, "linked");
+});

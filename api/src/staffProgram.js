@@ -132,6 +132,9 @@ export const QUESTIONS = [
   { key: "if_owner", label: "¿Qué harías si fueras owner del Discord y del juego?", type: "long", required: true },
 ];
 
+// Video de la bienvenida del staff (modal al ser aprobado y pestaña Guía).
+export const WELCOME_VIDEOS = [{ site: "youtube", id: "fjf0TcLgY0Q", url: "https://youtu.be/fjf0TcLgY0Q", title: "Bienvenida al staff de Sky Eggs" }];
+
 export const RULES = [
   "Neutralidad: nada de favores a amigos ni sanciones por enojo personal.",
   "Primero se avisa (;Warn), después se actúa. Los baneos siempre con motivo claro.",
@@ -147,7 +150,7 @@ export const RULES = [
 export function publicStaffProgram(cfg, settings = null) {
   const tasks = settings ? TASKS.map((t) => ({ ...t, min: { ...t.min, ...settings.targets[t.key]?.min }, goal: { ...t.goal, ...settings.targets[t.key]?.goal } })) : TASKS;
   return {
-    ranks: RANKS, tasks, questions: QUESTIONS, rules: RULES,
+    ranks: RANKS, tasks, questions: QUESTIONS, rules: RULES, welcomeVideos: WELCOME_VIDEOS,
     weekly: settings?.weekly || null, discordCredit: settings ? { weight: settings.discord.weight, windowMinutes: settings.discord.windowMinutes, dailyCapMinutes: settings.discord.dailyCapMinutes, enabled: settings.discord.channels.length > 0 } : null,
     promotionRules: settings?.promotion || null, excuseDays: settings?.rules.excuseDays ?? 5,
     linkDeadline: cfg.staff.linkDeadline, failMonthsToRemove: settings?.rules.failMonthsToRemove ?? cfg.staff.failMonthsToRemove,
