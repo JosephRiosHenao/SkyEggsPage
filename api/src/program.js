@@ -87,6 +87,12 @@ export const PACKS = [
 ];
 export const PACK_BY_KEY = Object.fromEntries(PACKS.map((p) => [p.key, p]));
 
+// Videos de la bienvenida (modal al ser aprobado y pestaña Guía).
+export const WELCOME_VIDEOS = [
+  { site: "youtube", id: "V7q6RxpdWgA", url: "https://youtu.be/V7q6RxpdWgA", title: "Así funciona el Programa de Creadores" },
+  { site: "tiktok", id: "7711134946613677319", url: "https://www.tiktok.com/@pochi_dev/video/7711134946613677319", title: "El programa en 1 minuto (TikTok)" },
+];
+
 export const ROBUX = { minViews: 10_000, per10k: 100, maxPerVideo: 1000 };
 export const SPECIAL = { monthlyViews: 100_000 };
 export const ROBLOX_LEVEL_TAGS = ["None", ...LEVELS.map((l) => l.key)];
@@ -113,6 +119,7 @@ export function publicProgram(cfg) {
     packs: PACKS,
     robux: ROBUX,
     special: SPECIAL,
+    welcomeVideos: WELCOME_VIDEOS,
     claimGraceDays: { week: cfg.creators.claimGraceDaysWeek, month: cfg.creators.claimGraceDaysMonth },
   };
 }

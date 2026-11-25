@@ -210,6 +210,23 @@ export function reviewPromotion(db, actor, body, now = Date.now()) {
   return { ok: true, job };
 }
 
+// Las listas de staff antiguo solo pasaban a "vinculado" desde "Vincular cuenta". Quien entró por
+// otro camino (solicitud de Helper aprobada, rango puesto a mano, o vinculó antes de que el bot o el
+// juego lo anotaran) se quedaba en "sin vincular" para siempre. Esto lo corrige al leer las listas.
+export function healLegacyLists(db) {
+  const ranks = RANK_KEYS.map(() => "?").join(", ");
+  db.prepare(`UPDATE staff_legacy_discord SET status = 'linked', removed_at = NULL WHERE status != 'linked'
+    AND discord_id IN (SELECT discord_id FROM staff WHERE link_status = 'approved' AND rank IN (${ranks}))`).run(...RANK_KEYS);
+  db.prepare(`UPDATE staff_legacy_game SET status = 'linked' WHERE status != 'linked'
+    AND roblox_user_id IN (SELECT roblox_user_id FROM staff WHERE link_status = 'approved' AND rank IN (${ranks}))`).run(...RANK_KEYS);
+}
+
+export function legacyPendingCount(db) {
+  healLegacyLists(db);
+  return db.prepare("SELECT COUNT(*) AS n FROM staff_legacy_discord WHERE status = 'pending'").get().n
+    + db.prepare("SELECT COUNT(*) AS n FROM staff_legacy_game WHERE status = 'notified'").get().n;
+}
+
 // ---------- Staff antiguo: vincular cuenta ----------
 // Quien ya tiene un rol de staff en Discord elige su Roblox. Si el juego ya vio esa cuenta con una
 // etiqueta de staff, se confirma sola; si no, la confirma un Moderator o el Admin.
@@ -317,6 +334,7 @@ export function syncDiscordStaff(db, cfg, members, now = Date.now()) {
       // Vinculado: Discord debe tener solo el rol de su rango.
       const want = st[s.rank];
       if (!m.roles.includes(want) || m.roles.some((r) => r !== want)) jobs.push({ discordId: m.id, staffRank: s.rank, reason: "sincronizar rango" });
+      db.prepare("UPDATE staff_legacy_discord SET status = 'linked', removed_at = NULL WHERE discord_id = ? AND status != 'linked'").run(m.id);
       continue;
     }
     db.prepare(`INSERT INTO staff_legacy_discord (discord_id, username, rank, seen_at, status) VALUES (?, ?, ?, ?, 'pending')
@@ -721,6 +739,7 @@ export function staffDashboard(db, cfg, now = Date.now()) {
   const playersByHour = Array.from({ length: 24 }, () => 0);
   for (const r of db.prepare("SELECT substr(hour, 12, 2) AS h, SUM(players) AS p, COUNT(DISTINCT substr(hour, 1, 10)) AS d FROM pull_hours WHERE hour >= ? GROUP BY h").all(since)) playersByHour[Number(r.h)] = Math.round(r.p / Math.max(1, r.d));
   const reports = db.prepare("SELECT SUM(status = 'open') AS open, SUM(status != 'open' AND resolved_at >= ?) AS closedMonth, AVG(CASE WHEN status != 'open' AND resolved_at >= ? THEN resolved_at - created_at END) AS avgMs FROM reports").get(monthStartMs(m), monthStartMs(m));
+  healLegacyLists(db);
   const legacyDiscord = db.prepare("SELECT * FROM staff_legacy_discord ORDER BY status, rank DESC").all();
   const legacyGame = db.prepare("SELECT l.*, p.last_seen FROM staff_legacy_game l LEFT JOIN players p ON p.user_id = l.roblox_user_id ORDER BY l.status, l.staff_tier DESC").all();
   return {

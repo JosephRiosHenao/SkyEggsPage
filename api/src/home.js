@@ -79,7 +79,7 @@ export function homeFeed(db, cfg, user, actor, now = Date.now()) {
     if (!botEnabled(cfg)) add(2, "🤖", "Falta el bot de Discord", "Sin él, los roles se ponen a mano y no se cuenta la actividad en Discord.", "admin-discord");
     else if (!settings.discord.channels.length) add(3, "💬", "Elige los canales de Discord que cuentan", "Así la actividad del staff en Discord suma a su cuota semanal.", "admin-staff-ajustes");
     else for (const c of discordChannelsStatus(db, settings).filter((c) => c.error)) add(2, "💬", `No se puede leer #${c.name || c.id}`, c.error, "admin-staff-ajustes");
-    const legacy = db.prepare("SELECT COUNT(*) AS n FROM staff_legacy_discord WHERE status = 'pending'").get().n + db.prepare("SELECT COUNT(*) AS n FROM staff_legacy_game WHERE status = 'notified'").get().n;
+    const legacy = S.legacyPendingCount(db);
     if (legacy && now < cfg.staff.linkDeadline) add(3, "⏳", "Staff antiguo sin vincular", `Fecha límite: ${fmtDate(cfg.staff.linkDeadline - 1)}.`, "staff-antiguos", legacy);
   }
 
