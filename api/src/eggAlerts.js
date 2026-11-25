@@ -114,6 +114,9 @@ function rowById(db, id) { return db.prepare("SELECT * FROM egg_alerts WHERE id 
 
 // El juego avisa de un absurdo. Guarda y publica. Devuelve { ok, id }.
 export async function receiveEggAlert(db, cfg, body, fetchImpl = fetch, log = console, now = Date.now()) {
+  // Servidor privado (VIP) o reservado: nadie de Discord puede unirse, así que no se publica
+  // (pedido del dueño 2026-11-24). El juego ya no las manda; esto cubre versiones viejas o pruebas.
+  if (body?.privateServer === true) return { ok: true, skipped: "private_server" };
   const key = str(body?.key, 80) || `${str(body?.jobId, 60)}:${num(body?.t) || now}`;
   const existing = db.prepare("SELECT id FROM egg_alerts WHERE alert_key = ?").get(key);
   if (existing) return { ok: true, id: existing.id, duplicate: true };
