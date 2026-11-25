@@ -22,7 +22,7 @@ function writeState(db, st, now) {
 
 // event: clave de ANNOUNCE_EVENTS. text: mensaje (sin menciones). auto: rangos para los avisos con
 // mention ["auto"] (p. ej. el rango superior a quien pide algo). users: IDs de Discord a mencionar.
-export async function announce(db, cfg, event, { text, auto = [], users = [] }, fetchImpl = fetch, now = Date.now()) {
+export async function announce(db, cfg, event, { text, auto = [], users = [], embeds, components }, fetchImpl = fetch, now = Date.now()) {
   try {
     const settings = getStaffSettings(db, cfg);
     const ev = settings.announce.events[event];
@@ -41,11 +41,12 @@ export async function announce(db, cfg, event, { text, auto = [], users = [] }, 
     const r = await fetchImpl(`${API}/channels/${cfg.discord.announceChannel}/messages`, {
       method: "POST",
       headers: { Authorization: `Bot ${cfg.discord.botToken}`, "content-type": "application/json" },
-      body: JSON.stringify({ content, allowed_mentions: { parse: [], roles, users: okUsers } }),
+      body: JSON.stringify({ content, allowed_mentions: { parse: [], roles, users: okUsers }, ...(embeds ? { embeds } : {}), ...(components ? { components } : {}) }),
     });
     if (!r.ok) return { sent: false, reason: `http_${r.status}` };
+    const msg = await r.json().catch(() => ({}));
     if (roles.length) { st[event] = now; writeState(db, st, now); }
-    return { sent: true, mentioned: roles.length > 0 };
+    return { sent: true, mentioned: roles.length > 0, messageId: msg?.id || null };
   } catch (e) {
     return { sent: false, reason: e.message };
   }

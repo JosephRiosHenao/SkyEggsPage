@@ -286,13 +286,13 @@ test("2 meses sin cuotas obligatorias: baja un rango (no sale); ascenso por dese
 });
 
 test("anuncios en Discord: menciona al rango, espacia las menciones y respeta los ajustes", async () => {
-  const db = openDb(":memory:"); const c = cfg(); c.discord.announceChannel = "1566631711910133860";
+  const db = openDb(":memory:"); const c = cfg(); c.discord.announceChannel = "1565510042851999834";
   const sent = [];
   const fake = async (url, init) => { sent.push({ url, body: JSON.parse(init.body) }); return { ok: true, status: 200, json: async () => ({}) }; };
   const t = Date.now();
   await announce(db, c, "creator_application", { text: "Nueva solicitud" }, fake, t);
   await announce(db, c, "creator_application", { text: "Otra solicitud" }, fake, t + 60_000);
-  assert.match(sent[0].url, /channels\/1566631711910133860\/messages/);
+  assert.match(sent[0].url, /channels\/1565510042851999834\/messages/);
   assert.match(sent[0].body.content, /^<@&1563736465522036736> Nueva solicitud/); // rol Moderator
   assert.deepEqual(sent[0].body.allowed_mentions.roles, ["1563736465522036736"]);
   assert.equal(sent[1].body.content, "Otra solicitud"); // a los 1 min: sin mención

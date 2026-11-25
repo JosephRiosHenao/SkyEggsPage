@@ -20,6 +20,7 @@ import { tx } from "./db.js";
 import * as C from "./creators.js";
 import { probeViews, updateYtDlp } from "./views.js";
 import { verifyInteraction, interactionsEnabled, REPLY, EPHEMERAL } from "./bot.js";
+import { postReview, resolveReview, handleReviewButton, sweepReviews } from "./reviews.js";
 import { announceVideo, refreshVideoMessage, handleVideoButton, resendVideo } from "./videos.js";
 import { receiveEggAlert, updateEggAlert, handleEggButton, expireOldAlerts, refreshEggMessage, resendEggAlert } from "./eggAlerts.js";
 import { saveCatalog, catalog, assetImage, syncAssets, assetStatus } from "./assets.js";
@@ -148,7 +149,10 @@ export function startLifecycle({ db, cfg, fetchImpl = fetch, log = console }) {
   const sweepTimer = setInterval(async () => {
     if (sweeping) return;
     sweeping = true;
-    try { await sweepPendingRoles(db, cfg, fetchImpl, log); } catch (e) { log.error("[discord] roles pendientes", e); } finally { sweeping = false; }
+    try {
+      await sweepPendingRoles(db, cfg, fetchImpl, log);
+      await sweepReviews(db, cfg, fetchImpl);
+    } catch (e) { log.error("[discord] barrido", e); } finally { sweeping = false; }
   }, 10 * 60_000);
   const pollTimer = setInterval(async () => {
     if (polling || !botEnabled(cfg)) return;
@@ -352,6 +356,76 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
   const stateCookie = (value, maxAgeS) => `se_oauth=${value}; Path=/api/auth; HttpOnly; SameSite=Lax; Max-Age=${maxAgeS}${sec}`;
   const fail = (u, code) => `${u}${u.includes("?") ? "&" : "?"}error=${code}`;
 
+  // Revisiones: una sola lógica para el panel y para los botones de la tarjeta en Discord.
+  // a = actor (staffActor/staffMember o discordActor), b = cuerpo { id | discordId, action, note, ... }.
+  const statusOf = (b) => (b.action === "approve" ? "approved" : b.action === "reject" ? "rejected" : null);
+  const reviewActions = {
+    async staff_application(a, b) {
+      const out = run(() => tx(db, () => S.reviewStaffApplication(db, a, b)));
+      await resolveReview(db, cfg, "staff_application", b.id, { status: out.status, by: a.name, note: b.note }, fetchImpl);
+      const r = out.job ? await runRoleJobs(db, cfg, [out.job], fetchImpl, log) : [];
+      celebrate(out.job);
+      return { ok: true, status: out.status, discordRole: !out.job ? null : botEnabled(cfg) ? (r[0]?.ok ? "ok" : r[0]?.notMember ? "pending_join" : "error") : "manual" };
+    },
+    async staff_link(a, b) {
+      const out = run(() => tx(db, () => S.reviewStaffLink(db, a, b)));
+      if (out.job) await runRoleJobs(db, cfg, [out.job], fetchImpl, log);
+      await resolveReview(db, cfg, "staff_link", b.discordId, { status: statusOf(b), by: a.name, note: b.note }, fetchImpl);
+      return { ok: true };
+    },
+    async staff_evidence(a, b) {
+      const out = run(() => S.reviewStaffEvidence(db, a, b));
+      await resolveReview(db, cfg, "staff_evidence", b.id, { status: statusOf(b), by: a.name, note: b.note }, fetchImpl);
+      return out;
+    },
+    async staff_excuse(a, b) {
+      const out = run(() => tx(db, () => S.reviewExcuse(db, cfg, a, b)));
+      await resolveReview(db, cfg, "staff_excuse", b.id, { status: statusOf(b), by: a.name, note: b.note }, fetchImpl);
+      return out;
+    },
+    async creator_application(a, b) {
+      const out = run(() => C.reviewApplication(db, a, b));
+      await resolveReview(db, cfg, "creator_application", b.id, { status: out.status, by: a.name, note: b.note }, fetchImpl);
+      if (out.status === "approved") {
+        const app = db.prepare("SELECT discord_id FROM applications WHERE id = ?").get(Number(b.id));
+        clearPublicCache();
+        if (app && botEnabled(cfg)) {
+          const r = await runRoleJobs(db, cfg, [{ discordId: app.discord_id, tierKey: "Creator", reason: "solicitud aprobada" }], fetchImpl, log);
+          out.discordRole = r[0]?.ok ? "ok" : r[0]?.notMember ? "pending_join" : "error";
+        } else out.discordRole = "manual";
+      }
+      // Rechazada: si tenía el rol de Content Creator (p. ej. creador antiguo), se le quita.
+      if (out.status === "rejected" && botEnabled(cfg)) {
+        const app = db.prepare("SELECT discord_id FROM applications WHERE id = ?").get(Number(b.id));
+        const linked = app && db.prepare("SELECT 1 FROM creators WHERE discord_id = ? AND link_status = 'approved'").get(app.discord_id);
+        if (app && !linked) {
+          const r = await runRoleJobs(db, cfg, [{ discordId: app.discord_id, tierKey: "None", reason: "solicitud rechazada" }], fetchImpl, log);
+          out.discordRole = r[0]?.ok ? "removed" : "error";
+        }
+      }
+      return out;
+    },
+    async creator_link(a, b) {
+      const out = run(() => C.reviewLink(db, a, b));
+      await resolveReview(db, cfg, "creator_link", b.discordId, { status: statusOf(b), by: a.name, note: b.note }, fetchImpl);
+      return out;
+    },
+    async creator_evidence(a, b) {
+      const out = run(() => C.reviewEvidence(db, a, b));
+      await resolveReview(db, cfg, "creator_evidence", b.id, { status: statusOf(b), by: a.name, note: b.note }, fetchImpl);
+      // Aprobada: se anuncia en el canal de videos de Discord (una sola vez). Vistas fijadas: se actualiza.
+      if (b.action === "approve" && out.status === "approved") announceVideo(db, cfg, b.id, fetchImpl, log);
+      else if (b.action === "update") refreshVideoMessage(db, cfg, b.id, fetchImpl).catch(() => {});
+      // Las vistas nuevas pueden subir el rango al momento.
+      try {
+        const ev = evaluateCreators(db, cfg);
+        if (ev.changes.length) { clearPublicCache(); out.rankChanges = ev.changes.length; }
+        runRoleJobs(db, cfg, ev.roleJobs, fetchImpl, log);
+      } catch (e) { log.error("[creadores]", e); }
+      return out;
+    },
+  };
+
   const routes = {
     "GET /api/health": () => ({ ok: true }),
 
@@ -466,22 +540,34 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
       let it;
       try { it = JSON.parse(raw.toString("utf8")); } catch { throw new HttpError(400, "bad_json"); }
       if (it.type === 1) return { type: REPLY.PONG };
-      if (it.type !== 3) return { type: REPLY.MESSAGE, data: { content: "🥚", flags: EPHEMERAL } };
+      if (it.type !== 3 && it.type !== 5) return { type: REPLY.MESSAGE, data: { content: "🥚", flags: EPHEMERAL } };
       const id = String(it.data?.custom_id || "");
       let out;
       try {
-        out = id.startsWith("v") ? await handleVideoButton(db, cfg, it, fetchImpl) : await handleEggButton(db, cfg, it, fetchImpl);
+        out = id.startsWith("rv:") ? await handleReviewButton(db, cfg, it, { act: (kind, a, b) => reviewActions[kind](a, b), fetchImpl })
+          : it.type === 5 ? { type: REPLY.MESSAGE, data: { content: "🥚", flags: EPHEMERAL } }
+          : id.startsWith("v") ? await handleVideoButton(db, cfg, it, fetchImpl) : await handleEggButton(db, cfg, it, fetchImpl);
       } catch (e) {
         log.error("[discord] botón", e);
         out = { type: REPLY.MESSAGE, data: { content: "Algo salió mal. Inténtalo de nuevo.", flags: EPHEMERAL } };
       }
       // Confirmación privada aparte (cuando el botón actualiza el mensaje público).
+      const followup = (text) => fetchImpl(`https://discord.com/api/v10/webhooks/${it.application_id}/${it.token}`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ content: text, flags: EPHEMERAL, allowed_mentions: { parse: [] } }),
+      }).catch(() => {});
       if (out.followup) {
         const text = out.followup; delete out.followup;
-        setTimeout(() => fetchImpl(`https://discord.com/api/v10/webhooks/${it.application_id}/${it.token}`, {
-          method: "POST", headers: { "content-type": "application/json" },
-          body: JSON.stringify({ content: text, flags: EPHEMERAL, allowed_mentions: { parse: [] } }),
-        }).catch(() => {}), 400);
+        setTimeout(() => followup(text), 400);
+      }
+      // Trabajo que corre después de responder (formularios de revisión): Discord exige respuesta en 3 s.
+      if (out.defer) {
+        const job = out.defer; delete out.defer;
+        setTimeout(async () => {
+          let text;
+          try { text = await job(); } catch (e) { log.error("[discord] revisión", e); text = "Algo salió mal. Inténtalo en el panel."; }
+          if (text) followup(text);
+        }, 50);
       }
       return out;
     },
@@ -651,7 +737,7 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
       if (!limits.apply.take(u.id)) throw new HttpError(429, "slow_down");
       const body = await readJson(req, 8192);
       const out = run(() => C.submitApplication(db, u.id, body));
-      announce(db, cfg, "creator_application", { text: `📝 **Nueva solicitud de creador** de @${u.username}. Revísala en ${cfg.siteUrl}/creadores/panel/#mod-solicitudes` }, fetchImpl);
+      postReview(db, cfg, "creator_application", out.id, fetchImpl);
       return out;
     },
     "GET /api/creators/me": async (req) => {
@@ -664,7 +750,7 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
       const u = requireCreator(req);
       const body = await readJson(req, 512);
       const out = run(() => C.requestLink(db, u.id, body.userId));
-      announce(db, cfg, "creator_link", { text: `🔗 El creador @${u.username} pidió vincular la cuenta de Roblox @${out.roblox.name}: ${cfg.siteUrl}/creadores/panel/#mod-vinculos` }, fetchImpl);
+      postReview(db, cfg, "creator_link", u.id, fetchImpl);
       return out;
     },
     "POST /api/creators/upload": async (req) => {
@@ -684,7 +770,7 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
       const u = requireCreator(req);
       const body = await readJson(req, 4096);
       const out = run(() => C.addEvidence(db, u.id, body));
-      announce(db, cfg, "creator_evidence", { text: `📹 **Nuevo video de creador** de @${u.username} para anotar las vistas: ${cfg.siteUrl}/creadores/panel/#mod-evidencias` }, fetchImpl);
+      postReview(db, cfg, "creator_evidence", out.id, fetchImpl);
       // Primera lectura de vistas en segundo plano (el moderador ya la ve al revisar).
       if (out.track === "auto" && cfg.views.enabled) probeEvidence(db, cfg, out.id, body.url, probe, log);
       return out;
@@ -736,7 +822,7 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
       const body = await readJson(req, 4096);
       const out = run(() => S.submitExcuse(db, cfg, u.id, body));
       const rank = S.getStaff(db, u.id)?.rank;
-      announce(db, cfg, "staff_excuse", { text: `📝 @${u.username} (${rank}) presentó una **excusa** (${out.scope === "week" ? "semana del" : "mes"} ${out.period}): ${cfg.siteUrl}/creadores/panel/#staff-excusas-revision`, auto: reviewerRanks(rank) }, fetchImpl);
+      postReview(db, cfg, "staff_excuse", out.id, fetchImpl);
       return out;
     },
     "GET /api/staff/me": async (req) => { const u = requireUser(req); return S.myStaffState(db, cfg, u); },
@@ -746,7 +832,7 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
       if (!limits.apply.take(`s${u.id}`)) throw new HttpError(429, "slow_down");
       const body = await readJson(req, 40_000);
       const out = run(() => S.submitStaffApplication(db, u.id, body));
-      announce(db, cfg, "staff_application", { text: `🛟 **Nueva solicitud de Helper** de @${u.username}: ${cfg.siteUrl}/creadores/panel/#staff-solicitudes` }, fetchImpl);
+      postReview(db, cfg, "staff_application", out.id, fetchImpl);
       return out;
     },
     "POST /api/staff/link": async (req) => {
@@ -755,7 +841,7 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
       const body = await readJson(req, 512);
       const out = run(() => tx(db, () => S.requestStaffLink(db, cfg, u, body)));
       if (out.job) await runRoleJobs(db, cfg, [out.job], fetchImpl, log);
-      if (!out.auto) announce(db, cfg, "staff_link", { text: `🔗 @${u.username} (${out.rank}) pidió vincular la cuenta de Roblox @${out.roblox.name}: ${cfg.siteUrl}/creadores/panel/#staff-solicitudes` }, fetchImpl);
+      if (!out.auto) postReview(db, cfg, "staff_link", u.id, fetchImpl);
       return { ok: true, auto: out.auto, rank: out.rank };
     },
     "POST /api/staff/evidence": async (req) => {
@@ -765,7 +851,7 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
       const body = await readJson(req, 4096);
       const out = run(() => S.addStaffEvidence(db, u.id, body));
       const rank = S.getStaff(db, u.id)?.rank;
-      announce(db, cfg, "staff_evidence", { text: `🧾 @${u.username} (${rank}) subió una evidencia de sus tareas: ${cfg.siteUrl}/creadores/panel/#staff-revision`, auto: reviewerRanks(rank) }, fetchImpl);
+      postReview(db, cfg, "staff_evidence", out.id, fetchImpl);
       return out;
     },
     "POST /api/staff/promotion": async (req) => {
@@ -780,21 +866,10 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
     // ----- Moderación del staff -----
     "GET /api/mod/staff": async (req) => { staffMember(req, "modjr"); return { ...S.staffDashboard(db, cfg), bot: botEnabled(cfg) }; },
     "GET /api/mod/staff/applications": async (req) => { staffActor(req); return { applications: S.staffApplicationsQueue(db) }; },
-    "POST /api/mod/staff/application": async (req) => {
-      checkOrigin(req); const a = staffActor(req); const b = await readJson(req, 2048);
-      const out = run(() => tx(db, () => S.reviewStaffApplication(db, a, b)));
-      const r = out.job ? await runRoleJobs(db, cfg, [out.job], fetchImpl, log) : [];
-      celebrate(out.job);
-      return { ok: true, status: out.status, discordRole: !out.job ? null : botEnabled(cfg) ? (r[0]?.ok ? "ok" : r[0]?.notMember ? "pending_join" : "error") : "manual" };
-    },
-    "POST /api/mod/staff/link": async (req) => {
-      checkOrigin(req); const a = staffActor(req); const b = await readJson(req, 1024);
-      const out = run(() => tx(db, () => S.reviewStaffLink(db, a, b)));
-      if (out.job) await runRoleJobs(db, cfg, [out.job], fetchImpl, log);
-      return { ok: true };
-    },
+    "POST /api/mod/staff/application": async (req) => { checkOrigin(req); const a = staffActor(req); const b = await readJson(req, 2048); return reviewActions.staff_application(a, b); },
+    "POST /api/mod/staff/link": async (req) => { checkOrigin(req); const a = staffActor(req); const b = await readJson(req, 1024); return reviewActions.staff_link(a, b); },
     "GET /api/mod/staff/evidence": async (req) => { const a = staffMember(req, "modjr"); return { evidences: S.staffEvidenceQueue(db, a) }; },
-    "POST /api/mod/staff/evidence": async (req) => { checkOrigin(req); const a = staffMember(req, "modjr"); const b = await readJson(req, 2048); return run(() => S.reviewStaffEvidence(db, a, b)); },
+    "POST /api/mod/staff/evidence": async (req) => { checkOrigin(req); const a = staffMember(req, "modjr"); const b = await readJson(req, 2048); return reviewActions.staff_evidence(a, b); },
     "POST /api/mod/staff/rank": async (req) => {
       checkOrigin(req); const a = staffActor(req); const b = await readJson(req, 1024);
       const out = run(() => tx(db, () => S.changeStaffRank(db, a, b)));
@@ -810,7 +885,7 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
       return { ok: true };
     },
     "GET /api/mod/staff/excuses": async (req) => { const a = staffMember(req, "modjr"); return { excuses: S.excuseQueue(db, a) }; },
-    "POST /api/mod/staff/excuse": async (req) => { checkOrigin(req); const a = staffMember(req, "modjr"); const b = await readJson(req, 2048); return run(() => tx(db, () => S.reviewExcuse(db, cfg, a, b))); },
+    "POST /api/mod/staff/excuse": async (req) => { checkOrigin(req); const a = staffMember(req, "modjr"); const b = await readJson(req, 2048); return reviewActions.staff_excuse(a, b); },
     // Ajustes del staff (solo el Admin los cambia; el resto del staff puede verlos).
     "GET /api/mod/staff/settings": async (req) => {
       staffMember(req, "modjr");
@@ -890,28 +965,7 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
       return { ok: true, tier, discord: botEnabled(cfg) ? (roles[0]?.ok ? "ok" : "error") : "manual" };
     },
     "GET /api/mod/audit": async (req, url) => { staffActor(req); return { audit: C.auditList(db, Number(url.searchParams.get("limit")) || 150) }; },
-    "POST /api/mod/application": async (req) => {
-      checkOrigin(req); const a = staffActor(req); const b = await readJson(req, 2048);
-      const out = run(() => C.reviewApplication(db, a, b));
-      if (out.status === "approved") {
-        const app = db.prepare("SELECT discord_id FROM applications WHERE id = ?").get(Number(b.id));
-        clearPublicCache();
-        if (app && botEnabled(cfg)) {
-          const r = await runRoleJobs(db, cfg, [{ discordId: app.discord_id, tierKey: "Creator", reason: "solicitud aprobada" }], fetchImpl, log);
-          out.discordRole = r[0]?.ok ? "ok" : r[0]?.notMember ? "pending_join" : "error";
-        } else out.discordRole = "manual";
-      }
-      // Rechazada: si tenía el rol de Content Creator (p. ej. creador antiguo), se le quita.
-      if (out.status === "rejected" && botEnabled(cfg)) {
-        const app = db.prepare("SELECT discord_id FROM applications WHERE id = ?").get(Number(b.id));
-        const linked = app && db.prepare("SELECT 1 FROM creators WHERE discord_id = ? AND link_status = 'approved'").get(app.discord_id);
-        if (app && !linked) {
-          const r = await runRoleJobs(db, cfg, [{ discordId: app.discord_id, tierKey: "None", reason: "solicitud rechazada" }], fetchImpl, log);
-          out.discordRole = r[0]?.ok ? "removed" : "error";
-        }
-      }
-      return out;
-    },
+    "POST /api/mod/application": async (req) => { checkOrigin(req); const a = staffActor(req); const b = await readJson(req, 2048); return reviewActions.creator_application(a, b); },
     // Corregir datos de una solicitud (redes repetidas, video en vez del canal, correo).
     "POST /api/mod/application/edit": async (req) => {
       checkOrigin(req); const a = staffActor(req); const b = await readJson(req, 8192);
@@ -919,21 +973,8 @@ export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (
       clearPublicCache(); // el carrusel público muestra las redes
       return out;
     },
-    "POST /api/mod/link": async (req) => { checkOrigin(req); const a = staffActor(req); const b = await readJson(req, 2048); return run(() => C.reviewLink(db, a, b)); },
-    "POST /api/mod/evidence": async (req) => {
-      checkOrigin(req); const a = staffActor(req); const b = await readJson(req, 2048);
-      const out = run(() => C.reviewEvidence(db, a, b));
-      // Aprobada: se anuncia en el canal de videos de Discord (una sola vez). Vistas fijadas: se actualiza.
-      if (b.action === "approve" && out.status === "approved") announceVideo(db, cfg, b.id, fetchImpl, log);
-      else if (b.action === "update") refreshVideoMessage(db, cfg, b.id, fetchImpl).catch(() => {});
-      // Las vistas nuevas pueden subir el rango al momento.
-      try {
-        const ev = evaluateCreators(db, cfg);
-        if (ev.changes.length) { clearPublicCache(); out.rankChanges = ev.changes.length; }
-        runRoleJobs(db, cfg, ev.roleJobs, fetchImpl, log);
-      } catch (e) { log.error("[creadores]", e); }
-      return out;
-    },
+    "POST /api/mod/link": async (req) => { checkOrigin(req); const a = staffActor(req); const b = await readJson(req, 2048); return reviewActions.creator_link(a, b); },
+    "POST /api/mod/evidence": async (req) => { checkOrigin(req); const a = staffActor(req); const b = await readJson(req, 2048); return reviewActions.creator_evidence(a, b); },
     "POST /api/mod/evidence/probe": async (req) => {
       checkOrigin(req); const a = staffActor(req);
       const b = await readJson(req, 256);

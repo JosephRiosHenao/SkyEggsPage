@@ -251,7 +251,8 @@ Página pública: `/staff/` (generada con `node scripts/build-staff-page.mjs` de
   - Las metas dan el **desempeño** (%) que se pide para ascender.
   - Sanciones, revisiones, invitaciones, eventos y bugs son solo opcionales.
 - **Bajada de rango**: con 2 meses seguidos sin las cuotas obligatorias (y sin excusa aprobada en los 5 días de plazo), baja un rango (Moderator → Moderator Jr → Helper → fuera).
-- **Anuncios en Discord** (`api/src/announce.js`): el bot escribe en `DISCORD_ANNOUNCE_CHANNEL` y menciona al rango que corresponde.
+- **Anuncios en Discord** (`api/src/announce.js`): el bot escribe en `DISCORD_ANNOUNCE_CHANNEL` (por defecto `1565510042851999834`) y menciona al rango que corresponde.
+- **Tarjetas de revisión** (`api/src/reviews.js`): solicitudes, vinculaciones, evidencias y excusas de creadores y staff se publican en ese mismo canal con contexto (progreso del mes, faltas, nivel, última conexión, seguidores, vistas leídas) y quién puede resolverlas. Botones: 🧭 Abrir en el panel, enlace del caso, 🎮 Perfil de Roblox, ✅ Aprobar / ✖️ Rechazar (abren un formulario y aplican las mismas reglas de rango que el panel), 👀 Lo reviso yo / Liberar y 🔎 Ver detalles (solo staff). Al resolverse, en Discord o en el panel, la tarjeta se edita sola con quién, cuándo y cuánto tardó. Cada 10 min se cierran las tarjetas cuyo caso ya no está pendiente. Requiere el bot con permiso para editar sus mensajes y la URL de interacciones configurada (la misma de videos y huevos). Para usar los botones hay que haber entrado al panel con Discord y tener Roblox vinculado.
   - Avisos: solicitudes y videos de creadores, bonos, solicitudes de Helper, excusas, ascensos, reportes del juego, bienvenidas y el recordatorio de vincular.
   - Cada aviso se activa o desactiva y elige a quién mencionar en Ajustes. Las menciones del mismo aviso se espacian 30 min.
   - El bot necesita «Enviar mensajes» y poder mencionar esos roles.

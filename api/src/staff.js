@@ -66,7 +66,7 @@ export function withStaffRoles(db, cfg, user, now = Date.now()) {
     roles: { ...r, moderator, modjr, helper: modjr || rank === "Helper", staffRank: rank, staffLinked: activeStaff(s), staffLegacy: Boolean(legacy) },
   };
 }
-const actorRankIdx = (actor) => (actor.role === "admin" ? 9 : rankIndex(actor.staffRank) || (actor.role === "moderator" ? 3 : 0));
+export const actorRankIdx = (actor) => (actor.role === "admin" ? 9 : rankIndex(actor.staffRank) || (actor.role === "moderator" ? 3 : 0));
 
 // ---------- Solicitud de Helper ----------
 export function myStaffApplication(db, discordId) {

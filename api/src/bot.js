@@ -67,7 +67,7 @@ export function verifyInteraction(publicKeyHex, signatureHex, timestamp, rawBody
 export const interactionsEnabled = (cfg) => botEnabled(cfg) && /^[0-9a-f]{64}$/i.test(cfg.discord.publicKey || "");
 
 // Tipos de respuesta de Discord.
-export const REPLY = { PONG: 1, MESSAGE: 4, UPDATE: 7 };
+export const REPLY = { PONG: 1, MESSAGE: 4, DEFERRED_UPDATE: 6, UPDATE: 7, MODAL: 9 };
 export const EPHEMERAL = 64;
 export const ephemeral = (content, embeds) => ({ type: REPLY.MESSAGE, data: { content, embeds, flags: EPHEMERAL, allowed_mentions: { parse: [] } } });
 
