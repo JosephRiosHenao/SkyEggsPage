@@ -154,6 +154,15 @@ export function startLifecycle({ db, cfg, fetchImpl = fetch, log = console }) {
       await sweepReviews(db, cfg, fetchImpl);
     } catch (e) { log.error("[discord] barrido", e); } finally { sweeping = false; }
   }, 10 * 60_000);
+  // Alertas de huevos: cada minuto, las de servidores cerrados o más viejas que un ciclo de día
+  // pasan a "se fue" y el mensaje de Discord pierde el botón Unirse (respaldo si el juego no avisa).
+  let expiring = false;
+  const eggTimer = setInterval(async () => {
+    if (expiring) return;
+    expiring = true;
+    try { for (const id of expireOldAlerts(db)) await refreshEggMessage(db, cfg, id, fetchImpl).catch(() => {}); }
+    catch (e) { log.error("[huevos] expirar", e); } finally { expiring = false; }
+  }, 60_000);
   const pollTimer = setInterval(async () => {
     if (polling || !botEnabled(cfg)) return;
     polling = true;
@@ -166,8 +175,6 @@ export function startLifecycle({ db, cfg, fetchImpl = fetch, log = console }) {
     if (running) return;
     running = true;
     try {
-      // Alertas de huevos de servidores que ya cerraron: pasan a "se fue".
-      for (const id of expireOldAlerts(db)) await refreshEggMessage(db, cfg, id, fetchImpl).catch(() => {});
       // Imágenes del catálogo que faltan (las nuevas de cada update del juego).
       syncAssets(db, cfg, fetchImpl, log).catch(() => {});
       const out = evaluateCreators(db, cfg);
@@ -199,7 +206,7 @@ export function startLifecycle({ db, cfg, fetchImpl = fetch, log = console }) {
   };
   const timer = setInterval(tick, 15 * 60_000);
   setTimeout(tick, 20_000);
-  return () => { clearInterval(timer); clearInterval(pollTimer); clearInterval(sweepTimer); };
+  return () => { clearInterval(timer); clearInterval(pollTimer); clearInterval(sweepTimer); clearInterval(eggTimer); };
 }
 
 export function createApp({ db, cfg, fetchImpl = fetch, log = console, probe = (c, u) => probeViews(c, u, fetchImpl) }) {

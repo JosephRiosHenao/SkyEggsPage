@@ -186,11 +186,17 @@ export async function updateEggAlert(db, cfg, body, fetchImpl = fetch, now = Dat
   return { ok: true };
 }
 
-// Alertas de servidores que ya cerraron (sin /pull hace rato) o muy viejas: pasan a "se fue".
+// Un huevo del mapa vive como mucho un ciclo de día/noche (336 s: clearMapEggs al empezar el día).
+// El juego avisa "gone" al quitarlo (EggAlertLogger.gone, 2026-11-26); esto es el respaldo por si
+// el aviso se pierde o el servidor tiene una versión vieja. Antes eran 2 h y el mensaje seguía
+// ofreciendo Unirse a un huevo que ya no estaba (queja del dueño).
+export const EGG_ALERT_MAX_MS = 15 * 60_000;
+
+// Alertas de servidores que ya cerraron (sin /pull hace rato) o viejas: pasan a "se fue".
 export function expireOldAlerts(db, now = Date.now()) {
   return db.prepare(`SELECT a.id FROM egg_alerts a LEFT JOIN live_servers s ON s.job_id = a.job_id
     WHERE a.status = 'active' AND (a.created_at < ? OR (a.studio = 0 AND s.last_pull IS NOT NULL AND s.last_pull < ? AND a.created_at < ?))`)
-    .all(now - 2 * 3600_000, now - 10 * 60_000, now - 10 * 60_000).map((r) => {
+    .all(now - EGG_ALERT_MAX_MS, now - 10 * 60_000, now - 10 * 60_000).map((r) => {
       db.prepare("UPDATE egg_alerts SET status = 'gone', ended_at = ? WHERE id = ?").run(now, r.id);
       return r.id;
     });

@@ -134,6 +134,33 @@ test("alerta de huevo absurdo: compacta, ícono en el mensaje, Unirse con cupo, 
   assert.equal(expireOldAlerts(db).length, 1);
 });
 
+test("huevo que desaparece sin que lo agarren (día nuevo): el mensaje dice despawned y ya no ofrece Unirse", async () => {
+  const db = openDb(":memory:"); const c = cfg(); const net = fakeNet();
+  gamePull(db, c, { jobId: "vivo-1", players: [{ userId: 1, name: "Uno", displayName: "Uno", level: 30 }] });
+  const body = { key: "vivo-1:1", asset: "Moon Egg", rarity: "Legendary", place: "Level3", jobId: "vivo-1", placeId: 77372347150746, players: 1, maxPlayers: 12 };
+  await receiveEggAlert(db, c, body, net.fetchImpl, silent);
+  await wait(60);
+  // El juego avisa "gone" (EggAlertLogger.gone desde clearMapEggs).
+  assert.equal((await updateEggAlert(db, c, { key: "vivo-1:1", status: "gone" }, net.fetchImpl)).ok, true);
+  await wait(60);
+  const patch = net.calls.filter((x) => x.method === "PATCH").pop();
+  const msg = JSON.parse(patch.body);
+  assert.equal(msg.embeds[0].title, "⌛ The egg despawned");
+  const ids = msg.components.flatMap((r) => r.components.map((b) => b.custom_id || b.label));
+  assert.ok(!ids.some((x) => String(x).startsWith("ejoin")), "sin botón Unirse");
+  const press = await handleEggButton(db, c, { data: { custom_id: `ejoin:${db.prepare("SELECT id FROM egg_alerts").get().id}` }, locale: "es-ES", member: { user: { id: "9" } } }, net.fetchImpl);
+  assert.match(press.data.content, /ya no está/);
+  // Respaldo: aunque el servidor siga vivo, una alerta de más de 15 min (un ciclo de día dura 336 s) se cierra.
+  const now = Date.now();
+  await receiveEggAlert(db, c, { ...body, key: "vivo-1:2" }, net.fetchImpl, silent, now - 16 * 60_000);
+  await receiveEggAlert(db, c, { ...body, key: "vivo-1:3" }, net.fetchImpl, silent, now - 5 * 60_000);
+  db.prepare("UPDATE live_servers SET last_pull = ? WHERE job_id = 'vivo-1'").run(now);
+  const expired = expireOldAlerts(db, now);
+  assert.equal(expired.length, 1);
+  assert.equal(db.prepare("SELECT status FROM egg_alerts WHERE alert_key = 'vivo-1:2'").get().status, "gone");
+  assert.equal(db.prepare("SELECT status FROM egg_alerts WHERE alert_key = 'vivo-1:3'").get().status, "active");
+});
+
 test("anuncio del video aprobado y botón de me gusta", async () => {
   const db = openDb(":memory:"); const c = cfg(); const net = fakeNet();
   C.upsertDiscordUser(db, { id: "cre", username: "luna" }, { inGuild: true });
